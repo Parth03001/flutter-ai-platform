@@ -334,9 +334,9 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
                                       width: _capturedImageSize!.width,
                                       height: _capturedImageSize!.height,
                                     ),
-                                    if (_allDetections.isNotEmpty)
+                                    if (_bestResult != null)
                                       DetectionOverlay(
-                                        results: _allDetections,
+                                        results: [_bestResult!],
                                         previewSize: _capturedImageSize!,
                                       ),
                                   ],
