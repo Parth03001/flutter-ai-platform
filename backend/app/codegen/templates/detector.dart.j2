@@ -121,16 +121,34 @@ class ModelManager {
     }
 
     interpreter.run(input, output);
-    return _parseGenericYolo(output[0], labels, threshold, inputSize, shape);
+    final detections = _parseGenericYolo(output[0], labels, threshold, inputSize, shape);
+    debugPrint('[Detector] raw detections: ${detections.length}, first bbox: ${detections.isNotEmpty ? detections.first.bbox : "none"}');
+    return detections;
   }
 
   static List<DetectionResult> _parseGenericYolo(List<dynamic> output, List<String> labels, double threshold, int inputSize, List<int> shape) {
     final results = <DetectionResult>[];
-    
+
     // Check if output is [4+N, 8400] or [8400, 4+N]
-    bool isTransposed = shape[1] < shape[2]; 
+    bool isTransposed = shape[1] < shape[2];
     int numElements = isTransposed ? shape[1] : shape[2];
     int numBoxes = isTransposed ? shape[2] : shape[1];
+
+    // Auto-detect whether coordinates are absolute pixels [0, inputSize]
+    // or already normalized [0, 1]. Sample the first few valid cx values:
+    // any absolute-pixel coord from a real detection will be > 1.5, whereas
+    // normalized coords are always ≤ 1.0.
+    double maxSampledCoord = 0.0;
+    final sampleCount = numBoxes < 200 ? numBoxes : 200;
+    for (int i = 0; i < sampleCount; i++) {
+      final cx = (isTransposed ? output[0][i] : output[i][0]) as double;
+      final cy = (isTransposed ? output[1][i] : output[i][1]) as double;
+      if (cx > maxSampledCoord) maxSampledCoord = cx;
+      if (cy > maxSampledCoord) maxSampledCoord = cy;
+    }
+    // If max sampled coord is ≤ 1.5 the model outputs normalized [0,1] coords;
+    // skip the /inputSize division so bboxes are placed correctly.
+    final double coordScale = maxSampledCoord > 1.5 ? inputSize.toDouble() : 1.0;
 
     for (int i = 0; i < numBoxes; i++) {
       double maxClassScore = -1.0;
@@ -155,10 +173,10 @@ class ModelManager {
           className: (classId >= 0 && classId < labels.length) ? labels[classId] : 'unknown (id:$classId)',
           confidence: maxClassScore,
           bbox: Rect.fromLTWH(
-            (cx - w / 2) / inputSize, 
-            (cy - h / 2) / inputSize, 
-            w / inputSize, 
-            h / inputSize
+            (cx - w / 2) / coordScale,
+            (cy - h / 2) / coordScale,
+            w / coordScale,
+            h / coordScale,
           ),
         ));
       }
