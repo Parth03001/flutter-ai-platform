@@ -21,35 +21,47 @@ class ModelManager {
 
   bool get isLoaded => _isLoaded;
 
+  int get labelsCount => _labels.length;
+
   Future<void> loadModel(String modelPath, String labelsPath) async {
     if (_currentModelPath == modelPath && _isLoaded) return;
 
+    _isLoaded = false;
+    _interpreter?.close();
+
+    // Always load labels first, independently of the interpreter delegate
     try {
-      _isLoaded = false;
-      _interpreter?.close();
-      
-      final options = InterpreterOptions();
-      if (Platform.isAndroid) {
-        options.addDelegate(GpuDelegateV2());
-      }
-      
-      _interpreter = await Interpreter.fromAsset(modelPath, options: options);
-      
       final labelsData = await rootBundle.loadString(labelsPath);
       _labels = labelsData
           .split('\n')
           .map((l) => l.trim())
           .where((l) => l.isNotEmpty)
           .toList();
-      
-      _currentModelPath = modelPath;
-      _isLoaded = true;
-      debugPrint('Model loaded: $modelPath with ${_labels.length} labels');
     } catch (e) {
-      debugPrint('Error loading model: $e');
-      _interpreter = await Interpreter.fromAsset(modelPath);
-      _isLoaded = true;
+      debugPrint('Error loading labels: $e');
+      _labels = [];
     }
+
+    // Try GPU delegate first, fall back to CPU if it fails
+    try {
+      final options = InterpreterOptions();
+      if (Platform.isAndroid) {
+        options.addDelegate(GpuDelegateV2());
+      }
+      _interpreter = await Interpreter.fromAsset(modelPath, options: options);
+    } catch (e) {
+      debugPrint('GPU delegate failed, falling back to CPU: $e');
+      try {
+        _interpreter = await Interpreter.fromAsset(modelPath);
+      } catch (e2) {
+        debugPrint('Error loading model: $e2');
+        return;
+      }
+    }
+
+    _currentModelPath = modelPath;
+    _isLoaded = true;
+    debugPrint('Model loaded: $modelPath with ${_labels.length} labels');
   }
 
   void dispose() {

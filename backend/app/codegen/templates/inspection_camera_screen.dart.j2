@@ -80,6 +80,7 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
           _isModelLoaded = true;
         });
         _addLog("Model loaded. Target classes: ${task['classes']}");
+        _addLog("Labels in model: ${ModelManager().labelsCount}");
       }
     } catch (e) {
       _addLog("AI Init error: $e");
