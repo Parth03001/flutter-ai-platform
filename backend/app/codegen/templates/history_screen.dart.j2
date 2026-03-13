@@ -1,7 +1,10 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:convert';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/database.dart';
+import '../ml/detection_result.dart';
+import '../widgets/detection_overlay.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -41,6 +44,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
             'taskName': tr.taskName,
             'detectedPart': tr.className,
             'success': tr.success,
+            'imagePath': tr.imagePath,
+            'detectionsJson': tr.detectionsJson,
           }).toList(),
         });
       }
@@ -119,28 +124,76 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         ),
                         children: [
                           const Divider(height: 1),
-                          ...tasks.map((task) => Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            child: Row(
+                          ...tasks.map((task) {
+                            final String? imgPath = task['imagePath'] as String?;
+                            final String? detectionsRaw = task['detectionsJson'] as String?;
+                            List<DetectionResult> detections = [];
+                            if (detectionsRaw != null) {
+                              try {
+                                detections = (jsonDecode(detectionsRaw) as List)
+                                    .map((e) => DetectionResult.fromJson(e as Map<String, dynamic>))
+                                    .toList();
+                              } catch (_) {}
+                            }
+                            final hasImage = imgPath != null && File(imgPath).existsSync();
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(
-                                  task['success'] ? Icons.check : Icons.close,
-                                  color: task['success'] ? Colors.green : Colors.red,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  child: Row(
                                     children: [
-                                      Text(task['taskName'] ?? 'Task', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                      Text('Detected: ${task['detectedPart']}', style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
+                                      Icon(
+                                        task['success'] ? Icons.check : Icons.close,
+                                        color: task['success'] ? Colors.green : Colors.red,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(task['taskName'] ?? 'Task', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                            Text('Detected: ${task['detectedPart']}', style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
+                                          ],
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
+                                if (hasImage)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: LayoutBuilder(
+                                        builder: (context, constraints) {
+                                          return Stack(
+                                            children: [
+                                              Image.file(
+                                                File(imgPath!),
+                                                width: constraints.maxWidth,
+                                                fit: BoxFit.cover,
+                                              ),
+                                              if (detections.isNotEmpty)
+                                                Positioned.fill(
+                                                  child: LayoutBuilder(
+                                                    builder: (ctx, c) => DetectionOverlay(
+                                                      results: detections,
+                                                      previewSize: Size(c.maxWidth, c.maxHeight),
+                                                    ),
+                                                  ),
+                                                ),
+                                            ],
+                                          );
+                                        },
+                                      ),
+                                    ),
+                                  ),
                               ],
-                            ),
-                          )).toList(),
+                            );
+                          }).toList(),
                           const SizedBox(height: 8),
                         ],
                       ),
