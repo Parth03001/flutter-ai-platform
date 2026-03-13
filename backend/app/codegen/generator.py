@@ -70,12 +70,14 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
                         )
                         task_classes = model_classes
 
+            ref_img = task.get("referenceImage")
             models_manifest.append({
                 "name": task.get("taskName") or task.get("modelName"),
                 "classes": task_classes,
                 "tflite_path": paths.get("tflite", "assets/models/model_0.tflite"),
                 "labels_path": paths.get("labels", "assets/models/labels_0.txt"),
-                "vehicle_code": task.get("vehicleCode") # Added for mobile filtering
+                "vehicle_code": task.get("vehicleCode"),
+                "reference_image": f"assets/reference_images/{ref_img}" if ref_img else None,
             })
     else:
         # Fallback to model list if no tasks defined
@@ -202,8 +204,18 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         # Add models manifest
         import json
         zf.writestr(f"{root}/assets/models_manifest.json", json.dumps(models_manifest, indent=2))
-        
+
         # Add master data for generic decoding
         zf.writestr(f"{root}/assets/master_data.json", json.dumps(master_data_manifest, indent=2))
+
+        # Bundle reference images into the app assets
+        from app.config import settings as app_settings
+        for entry in models_manifest:
+            ref = entry.get("reference_image")
+            if ref:
+                filename = ref.split("/")[-1]
+                img_path = app_settings.reference_images_dir / filename
+                if img_path.exists():
+                    zf.writestr(f"{root}/assets/reference_images/{filename}", img_path.read_bytes())
 
     return buf.getvalue()
