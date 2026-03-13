@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../ml/detector.dart';
 import '../ml/detection_result.dart';
 import '../database/database.dart';
+import '../widgets/detection_overlay.dart';
 
 class InspectionCameraScreen extends StatefulWidget {
   final String vin;
@@ -39,6 +40,7 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
   List<String> _debugLogs = [];
   bool _showDebugConsole = false;
 
+  List<DetectionResult> _allDetections = [];
   int _currentIndex = 0;
   final Map<int, dynamic> _results = {};
 
@@ -144,6 +146,7 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
       _addLog("Target: ${targetClasses.join(', ')}");
       
       final allDetections = await ModelManager().predictBytes(bytes);
+      setState(() => _allDetections = allDetections);
       _addLog("Raw objects found: ${allDetections.length}");
       
       for(var d in allDetections) {
@@ -185,7 +188,7 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
 
   void _retake() {
     _addLog("Retake requested");
-    setState(() { _capturedImageBytes = null; _bestResult = null; _isAnalyzing = false; });
+    setState(() { _capturedImageBytes = null; _bestResult = null; _isAnalyzing = false; _allDetections = []; });
   }
 
   void _onSaveAndContinue() {
@@ -273,6 +276,15 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
                       Positioned.fill(child: _isCameraInitialized && _cameraController != null ? CameraPreview(_cameraController!) : const Center(child: CircularProgressIndicator(color: Color(0xFFDC143C)))),
                     if (_capturedImageBytes != null)
                       Positioned.fill(child: Image.memory(_capturedImageBytes!, fit: BoxFit.contain)),
+                    if (_capturedImageBytes != null && _allDetections.isNotEmpty)
+                      Positioned.fill(
+                        child: LayoutBuilder(
+                          builder: (context, constraints) => DetectionOverlay(
+                            results: _allDetections,
+                            previewSize: Size(constraints.maxWidth, constraints.maxHeight),
+                          ),
+                        ),
+                      ),
 
                     if (_capturedImageBytes == null)
                       Center(child: Container(width: 280, height: 280, decoration: BoxDecoration(border: Border.all(color: const Color(0xFFDC143C), width: 2)))),
