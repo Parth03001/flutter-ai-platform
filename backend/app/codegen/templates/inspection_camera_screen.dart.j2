@@ -152,19 +152,23 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
 
       final filtered = allDetections.where((d) => targetClasses.any((tc) => d.className.toLowerCase().contains(tc.toLowerCase()))).toList();
       _addLog("Matches after filtering: ${filtered.length}");
-      
+
       setState(() {
         if (filtered.isNotEmpty) {
           filtered.sort((a, b) => b.confidence.compareTo(a.confidence));
           _bestResult = filtered.first;
           _addLog("WINNER: ${_bestResult!.className}");
-          
+
           _results[_currentIndex] = {
             'className': _bestResult!.className,
             'success': true,
           };
         } else {
           _addLog("RESULT: NOT FOUND");
+          if (allDetections.isNotEmpty) {
+            final best = allDetections.reduce((a, b) => a.confidence > b.confidence ? a : b);
+            _addLog("CONFIG MISMATCH? Model detected '${best.className}' but target is '${targetClasses.join(', ')}'");
+          }
           _results[_currentIndex] = {
             'className': 'None',
             'success': false,

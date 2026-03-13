@@ -50,9 +50,29 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         for task in inspection_tasks:
             mid = task.get("modelId")
             paths = model_id_to_paths.get(mid, {})
+            task_classes = task.get("classes", [])
+
+            # Validate task classes against the model's actual trained classes.
+            # If none of the configured classes exist in the model, fall back to
+            # the model's full class list to prevent silent NOT FOUND mismatches.
+            model_for_task = next(
+                (ma for ma in models_list if get_attr(ma, "id") == mid), None
+            )
+            if model_for_task:
+                model_classes = get_attr(model_for_task, "classes", []) or []
+                if model_classes:
+                    valid = [c for c in task_classes if c in model_classes]
+                    if not valid:
+                        print(
+                            f"[generator] WARNING: task '{task.get('taskName')}' "
+                            f"classes {task_classes} not found in model classes "
+                            f"{model_classes}. Using model classes as fallback."
+                        )
+                        task_classes = model_classes
+
             models_manifest.append({
                 "name": task.get("taskName") or task.get("modelName"),
-                "classes": task.get("classes", []),
+                "classes": task_classes,
                 "tflite_path": paths.get("tflite", "assets/models/model_0.tflite"),
                 "labels_path": paths.get("labels", "assets/models/labels_0.txt"),
                 "vehicle_code": task.get("vehicleCode") # Added for mobile filtering
