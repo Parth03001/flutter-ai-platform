@@ -1,6 +1,7 @@
 import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/database.dart';
 import '../ml/detection_result.dart';
@@ -167,27 +168,9 @@ class _HistoryScreenState extends State<HistoryScreen> {
                                     padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
                                     child: ClipRRect(
                                       borderRadius: BorderRadius.circular(8),
-                                      child: LayoutBuilder(
-                                        builder: (context, constraints) {
-                                          return Stack(
-                                            children: [
-                                              Image.file(
-                                                File(imgPath!),
-                                                width: constraints.maxWidth,
-                                                fit: BoxFit.cover,
-                                              ),
-                                              if (detections.isNotEmpty)
-                                                Positioned.fill(
-                                                  child: LayoutBuilder(
-                                                    builder: (ctx, c) => DetectionOverlay(
-                                                      results: detections,
-                                                      previewSize: Size(c.maxWidth, c.maxHeight),
-                                                    ),
-                                                  ),
-                                                ),
-                                            ],
-                                          );
-                                        },
+                                      child: _HistoryImageWithOverlay(
+                                        imagePath: imgPath!,
+                                        detections: detections,
                                       ),
                                     ),
                                   ),
@@ -204,3 +187,66 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 }
 
+/// Loads the EXIF-corrected image size then renders the image and the
+/// single best-match bbox overlay using the same FittedBox approach as
+/// the capture screen — ensuring pixel-accurate alignment.
+class _HistoryImageWithOverlay extends StatefulWidget {
+  final String imagePath;
+  final List<DetectionResult> detections;
+
+  const _HistoryImageWithOverlay({required this.imagePath, required this.detections});
+
+  @override
+  State<_HistoryImageWithOverlay> createState() => _HistoryImageWithOverlayState();
+}
+
+class _HistoryImageWithOverlayState extends State<_HistoryImageWithOverlay> {
+  Size? _imageSize;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSize();
+  }
+
+  Future<void> _loadSize() async {
+    try {
+      final bytes = await File(widget.imagePath).readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded != null && mounted) {
+        final oriented = img.bakeOrientation(decoded);
+        setState(() => _imageSize = Size(oriented.width.toDouble(), oriented.height.toDouble()));
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_imageSize == null) {
+      return Image.file(File(widget.imagePath), fit: BoxFit.contain);
+    }
+    return FittedBox(
+      fit: BoxFit.contain,
+      child: SizedBox(
+        width: _imageSize!.width,
+        height: _imageSize!.height,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(
+              File(widget.imagePath),
+              fit: BoxFit.fill,
+              width: _imageSize!.width,
+              height: _imageSize!.height,
+            ),
+            if (widget.detections.isNotEmpty)
+              DetectionOverlay(
+                results: widget.detections,
+                previewSize: _imageSize!,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

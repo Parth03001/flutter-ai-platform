@@ -180,10 +180,8 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
       } catch (e) {
         _addLog("Image save error: $e");
       }
-      final detectionsJson = jsonEncode(allDetections.map((d) => d.toJson()).toList());
-
       _addLog("Raw objects found: ${allDetections.length}");
-      
+
       for(var d in allDetections) {
         _addLog("Found: ${d.className} (${(d.confidence*100).toStringAsFixed(1)}%)");
       }
@@ -196,6 +194,9 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
           filtered.sort((a, b) => b.confidence.compareTo(a.confidence));
           _bestResult = filtered.first;
           _addLog("WINNER: ${_bestResult!.className}");
+
+          // Store only the single winning bbox so history shows one clean box.
+          final detectionsJson = jsonEncode([_bestResult!.toJson()]);
 
           _results[_currentIndex] = {
             'className': _bestResult!.className,
@@ -213,7 +214,7 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
             'className': 'None',
             'success': false,
             'imagePath': savedImagePath,
-            'detectionsJson': detectionsJson,
+            'detectionsJson': jsonEncode([]),
           };
         }
         _isAnalyzing = false;
