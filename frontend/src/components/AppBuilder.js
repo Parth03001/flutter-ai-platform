@@ -141,6 +141,7 @@ export default function AppBuilder() {
   }, {});
 
   return (
+    <>
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)' }}>
       {/* Top Header */}
       <div style={{ height: 64, background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', padding: '0 24px', justifyContent: 'space-between' }}>
@@ -835,6 +836,7 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
       onConfirm={confirmConfig?.onConfirm}
       onCancel={() => setConfirmConfig(null)}
     />
+    </>
   );
 }
 
