@@ -141,7 +141,6 @@ export default function AppBuilder() {
   }, {});
 
   return (
-    <>
     <div style={{ flex: 1, display: 'flex', flexDirection: 'column', height: '100vh', background: 'var(--bg)' }}>
       {/* Top Header */}
       <div style={{ height: 64, background: C.surface, borderBottom: `1px solid ${C.border}`, display: 'flex', alignItems: 'center', padding: '0 24px', justifyContent: 'space-between' }}>
@@ -288,6 +287,15 @@ export default function AppBuilder() {
       {showProfileModal && <ProfileModal existingApp={app} startAtReview={modalStartAtReview} onClose={() => { setShowProfileModal(false); loadData(); }} />}
       
       <style>{` @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } } `}</style>
+
+      <ConfirmModal
+        isOpen={!!confirmConfig}
+        title={confirmConfig?.title}
+        message={confirmConfig?.message}
+        confirmLabel={confirmConfig?.confirmLabel}
+        onConfirm={confirmConfig?.onConfirm}
+        onCancel={() => setConfirmConfig(null)}
+      />
     </div>
   );
 }
@@ -827,16 +835,6 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
         )}
       </div>
     </div>
-
-    <ConfirmModal
-      isOpen={!!confirmConfig}
-      title={confirmConfig?.title}
-      message={confirmConfig?.message}
-      confirmLabel={confirmConfig?.confirmLabel}
-      onConfirm={confirmConfig?.onConfirm}
-      onCancel={() => setConfirmConfig(null)}
-    />
-    </>
   );
 }
 
