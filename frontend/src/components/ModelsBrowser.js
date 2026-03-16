@@ -2,11 +2,13 @@ import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { Brain, Trash2, Plus, CheckCircle2 } from 'lucide-react';
 import { getModels, deleteModel } from '../api';
+import ConfirmModal from './ConfirmModal';
 import '../styles/ModelsBrowser.css';
 
 export default function ModelLibrary() {
   const [models, setModels] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [confirmConfig, setConfirmConfig] = useState(null);
 
   useEffect(() => {
     getModels()
@@ -17,9 +19,16 @@ export default function ModelLibrary() {
       .catch(() => setLoading(false));
   }, []);
 
-  const handleDelete = (id) => {
-    if (!window.confirm('Delete this model?')) return;
-    deleteModel(id).then(() => setModels(m => m.filter(x => x.id !== id)));
+  const handleDelete = (id, name) => {
+    setConfirmConfig({
+      title: 'Delete Model',
+      message: `"${name}" will be permanently removed from the library. This action cannot be undone.`,
+      confirmLabel: 'Delete',
+      onConfirm: () => {
+        setConfirmConfig(null);
+        deleteModel(id).then(() => setModels(m => m.filter(x => x.id !== id)));
+      },
+    });
   };
 
   return (
@@ -86,7 +95,7 @@ export default function ModelLibrary() {
                   <CheckCircle2 size={12} />
                   Ready
                 </div>
-                <button className="btn-danger" onClick={() => handleDelete(model.id)}>
+                <button className="btn-danger" onClick={() => handleDelete(model.id, model.vision_project_name)}>
                   <Trash2 size={13} />
                   Delete
                 </button>
@@ -95,6 +104,14 @@ export default function ModelLibrary() {
           ))}
         </div>
       )}
+      <ConfirmModal
+        isOpen={!!confirmConfig}
+        title={confirmConfig?.title}
+        message={confirmConfig?.message}
+        confirmLabel={confirmConfig?.confirmLabel}
+        onConfirm={confirmConfig?.onConfirm}
+        onCancel={() => setConfirmConfig(null)}
+      />
     </div>
   );
 }

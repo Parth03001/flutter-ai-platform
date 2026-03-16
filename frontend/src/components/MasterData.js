@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { getMasterMappings, createMasterMapping, updateMasterMapping, deleteMasterMapping } from '../api';
 import { Search, Pencil, Trash2 } from 'lucide-react';
+import ConfirmModal from './ConfirmModal';
 import '../styles/MasterData.css';
 
 export default function MasterData() {
@@ -16,8 +17,11 @@ export default function MasterData() {
   // Multi-select delete state
   const [selectedIds, setSelectedIds] = useState(new Set());
 
+  // Confirm modal state  { title, message, onConfirm }  or  null = closed
+  const [confirmConfig, setConfirmConfig] = useState(null);
+
   // Edit modal state
-  const [editItem, setEditItem] = useState(null); // null = closed
+  const [editItem, setEditItem] = useState(null);
   const [editPlatform, setEditPlatform] = useState('');
   const [editCode, setEditCode] = useState('');
   const [editDesc, setEditDesc] = useState('');
@@ -59,15 +63,22 @@ export default function MasterData() {
   };
 
   // ── Single delete ─────────────────────────────────────────────────────────
-  const handleDelete = async (id) => {
-    if (!window.confirm('Delete this mapping?')) return;
-    try {
-      await deleteMasterMapping(id);
-      setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
-      loadData();
-    } catch {
-      alert('Failed to delete');
-    }
+  const handleDelete = (id) => {
+    setConfirmConfig({
+      title: 'Delete Mapping',
+      message: 'This mapping will be permanently removed. This action cannot be undone.',
+      confirmLabel: 'Delete',
+      onConfirm: async () => {
+        setConfirmConfig(null);
+        try {
+          await deleteMasterMapping(id);
+          setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
+          loadData();
+        } catch {
+          alert('Failed to delete');
+        }
+      },
+    });
   };
 
   // ── Multi-select ──────────────────────────────────────────────────────────
@@ -87,17 +98,24 @@ export default function MasterData() {
     }
   };
 
-  const handleBulkDelete = async () => {
+  const handleBulkDelete = () => {
     if (selectedIds.size === 0) return;
-    if (!window.confirm(`Delete ${selectedIds.size} selected mapping(s)?`)) return;
-    try {
-      await Promise.all([...selectedIds].map(id => deleteMasterMapping(id)));
-      setSelectedIds(new Set());
-      loadData();
-    } catch {
-      alert('Failed to delete some mappings');
-      loadData();
-    }
+    setConfirmConfig({
+      title: `Delete ${selectedIds.size} Mapping${selectedIds.size > 1 ? 's' : ''}`,
+      message: `You are about to permanently delete ${selectedIds.size} selected mapping${selectedIds.size > 1 ? 's' : ''}. This action cannot be undone.`,
+      confirmLabel: `Delete ${selectedIds.size}`,
+      onConfirm: async () => {
+        setConfirmConfig(null);
+        try {
+          await Promise.all([...selectedIds].map(id => deleteMasterMapping(id)));
+          setSelectedIds(new Set());
+          loadData();
+        } catch {
+          alert('Failed to delete some mappings');
+          loadData();
+        }
+      },
+    });
   };
 
   // ── Edit modal ────────────────────────────────────────────────────────────
@@ -293,10 +311,20 @@ export default function MasterData() {
 
       </div>
 
+      {/* ── Confirm Modal ──────────────────────────────────────────────────── */}
+      <ConfirmModal
+        isOpen={!!confirmConfig}
+        title={confirmConfig?.title}
+        message={confirmConfig?.message}
+        confirmLabel={confirmConfig?.confirmLabel}
+        onConfirm={confirmConfig?.onConfirm}
+        onCancel={() => setConfirmConfig(null)}
+      />
+
       {/* ── Edit Modal ─────────────────────────────────────────────────────── */}
       {editItem && (
         <div className="modal-overlay" onClick={closeEdit}>
-          <div className="modal-box" onClick={e => e.stopPropagation()}>
+          <div className="modal-box" style={{ maxWidth: 520 }} onClick={e => e.stopPropagation()}>
             <h3 className="modal-title">Edit Mapping</h3>
             <div className="modal-fields">
               <div className="master-form-field">

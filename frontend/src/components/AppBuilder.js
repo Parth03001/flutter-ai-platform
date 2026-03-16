@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { getApp, getModels, buildAPK, downloadAPK, updateApp, uploadModel, getModelStatus, extractClasses, createApp, getMasterMappings, uploadReferenceImage, getReferenceImageUrl } from '../api';
+import ConfirmModal from './ConfirmModal';
 
 const C = {
   surface: 'var(--surface)', surface2: 'var(--surface2)',
@@ -22,6 +23,7 @@ export default function AppBuilder() {
   const [buildLoading, setBuildLoading] = useState(false);
   const [showModelModal, setShowModelModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState(null);
   
   const pollingRef = useRef(null);
   const logEndRef = useRef(null);
@@ -83,11 +85,18 @@ export default function AppBuilder() {
     loadData();
   };
 
-  const removeTask = async (taskIdx) => {
-    if (!window.confirm('Are you sure you want to remove this inspection task?')) return;
-    const newTasks = app.inspection_tasks.filter((_, i) => i !== taskIdx);
-    await updateApp(id, { inspection_tasks: newTasks });
-    loadData();
+  const removeTask = (taskIdx) => {
+    setConfirmConfig({
+      title: 'Remove Inspection Task',
+      message: 'This inspection task will be removed from the app configuration.',
+      confirmLabel: 'Remove',
+      onConfirm: async () => {
+        setConfirmConfig(null);
+        const newTasks = app.inspection_tasks.filter((_, i) => i !== taskIdx);
+        await updateApp(id, { inspection_tasks: newTasks });
+        loadData();
+      },
+    });
   };
 
   const [draggedIdx, setDraggedIdx] = useState(null);
@@ -817,6 +826,15 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
         )}
       </div>
     </div>
+
+    <ConfirmModal
+      isOpen={!!confirmConfig}
+      title={confirmConfig?.title}
+      message={confirmConfig?.message}
+      confirmLabel={confirmConfig?.confirmLabel}
+      onConfirm={confirmConfig?.onConfirm}
+      onCancel={() => setConfirmConfig(null)}
+    />
   );
 }
 
