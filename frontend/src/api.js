@@ -68,6 +68,7 @@ export const getReferenceImageUrl = (filename) =>
 // ── Master Data ──────────────────────────────────────────────────────────────
 export const getMasterMappings = () => api.get('/master-data');
 export const createMasterMapping = (data) => api.post('/master-data', data);
+export const updateMasterMapping = (id, data) => api.put(`/master-data/${id}`, data);
 export const deleteMasterMapping = (id) => api.delete(`/master-data/${id}`);
 
 export default api;

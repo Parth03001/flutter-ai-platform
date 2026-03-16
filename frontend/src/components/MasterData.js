@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
-import { getMasterMappings, createMasterMapping, deleteMasterMapping } from '../api';
-import { Search } from 'lucide-react';
+import { getMasterMappings, createMasterMapping, updateMasterMapping, deleteMasterMapping } from '../api';
+import { Search, Pencil, Trash2 } from 'lucide-react';
 import '../styles/MasterData.css';
 
 export default function MasterData() {
@@ -8,9 +8,20 @@ export default function MasterData() {
   const [loading, setLoading] = useState(true);
   const [searchTerm, setSearchTerm] = useState('');
 
+  // Add form state
   const [platformName, setPlatformName] = useState('');
   const [modelCode, setModelCode] = useState('');
   const [description, setDescription] = useState('');
+
+  // Multi-select delete state
+  const [selectedIds, setSelectedIds] = useState(new Set());
+
+  // Edit modal state
+  const [editItem, setEditItem] = useState(null); // null = closed
+  const [editPlatform, setEditPlatform] = useState('');
+  const [editCode, setEditCode] = useState('');
+  const [editDesc, setEditDesc] = useState('');
+  const [editSaving, setEditSaving] = useState(false);
 
   useEffect(() => { loadData(); }, []);
 
@@ -26,13 +37,18 @@ export default function MasterData() {
     }
   };
 
+  // ── Add ──────────────────────────────────────────────────────────────────────
   const handleSave = async () => {
-    if (!platformName || !modelCode) {
+    if (!platformName.trim() || !modelCode.trim()) {
       alert('Platform Name and Model Code are required');
       return;
     }
     try {
-      await createMasterMapping({ platform_name: platformName, model_code: modelCode, description });
+      await createMasterMapping({
+        platform_name: platformName.trim(),
+        model_code: modelCode.trim(),
+        description: description.trim() || undefined,
+      });
       setPlatformName('');
       setModelCode('');
       setDescription('');
@@ -42,16 +58,82 @@ export default function MasterData() {
     }
   };
 
+  // ── Single delete ─────────────────────────────────────────────────────────
   const handleDelete = async (id) => {
     if (!window.confirm('Delete this mapping?')) return;
     try {
       await deleteMasterMapping(id);
+      setSelectedIds(prev => { const n = new Set(prev); n.delete(id); return n; });
       loadData();
     } catch {
       alert('Failed to delete');
     }
   };
 
+  // ── Multi-select ──────────────────────────────────────────────────────────
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const n = new Set(prev);
+      n.has(id) ? n.delete(id) : n.add(id);
+      return n;
+    });
+  };
+
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredMappings.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredMappings.map(m => m.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    if (!window.confirm(`Delete ${selectedIds.size} selected mapping(s)?`)) return;
+    try {
+      await Promise.all([...selectedIds].map(id => deleteMasterMapping(id)));
+      setSelectedIds(new Set());
+      loadData();
+    } catch {
+      alert('Failed to delete some mappings');
+      loadData();
+    }
+  };
+
+  // ── Edit modal ────────────────────────────────────────────────────────────
+  const openEdit = (item) => {
+    setEditItem(item);
+    setEditPlatform(item.platform_name);
+    setEditCode(item.model_code);
+    setEditDesc(item.description || '');
+  };
+
+  const closeEdit = () => {
+    setEditItem(null);
+  };
+
+  const handleEditSave = async () => {
+    if (!editPlatform.trim() || !editCode.trim()) {
+      alert('Platform Name and Model Code are required');
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await updateMasterMapping(editItem.id, {
+        platform_name: editPlatform.trim(),
+        model_code: editCode.trim(),
+        description: editDesc.trim() || null,
+      });
+      closeEdit();
+      loadData();
+    } catch (err) {
+      alert(err.response?.data?.detail || 'Failed to update mapping');
+    } finally {
+      setEditSaving(false);
+    }
+  };
+
+  // ── Filtered + grouped ────────────────────────────────────────────────────
   const filteredMappings = mappings.filter(m =>
     m.model_code.toLowerCase().includes(searchTerm.toLowerCase()) ||
     m.platform_name.toLowerCase().includes(searchTerm.toLowerCase()) ||
@@ -63,6 +145,8 @@ export default function MasterData() {
     acc[m.platform_name].push(m);
     return acc;
   }, {});
+
+  const allVisibleSelected = filteredMappings.length > 0 && selectedIds.size === filteredMappings.length;
 
   return (
     <div className="page-container">
@@ -121,14 +205,22 @@ export default function MasterData() {
                 ({mappings.length})
               </span>
             </h2>
-            <div className="master-search-wrap">
-              <Search size={15} className="master-search-icon" />
-              <input
-                className="master-search"
-                value={searchTerm}
-                onChange={e => setSearchTerm(e.target.value)}
-                placeholder="Search code, platform..."
-              />
+            <div style={{ display: 'flex', alignItems: 'center', gap: 12 }}>
+              {selectedIds.size > 0 && (
+                <button className="btn-bulk-delete" onClick={handleBulkDelete}>
+                  <Trash2 size={14} />
+                  Delete Selected ({selectedIds.size})
+                </button>
+              )}
+              <div className="master-search-wrap">
+                <Search size={15} className="master-search-icon" />
+                <input
+                  className="master-search"
+                  value={searchTerm}
+                  onChange={e => setSearchTerm(e.target.value)}
+                  placeholder="Search code, platform..."
+                />
+              </div>
             </div>
           </div>
 
@@ -142,31 +234,53 @@ export default function MasterData() {
             <table className="master-table">
               <thead>
                 <tr>
+                  <th style={{ width: 40 }}>
+                    <input
+                      type="checkbox"
+                      className="master-checkbox"
+                      checked={allVisibleSelected}
+                      onChange={toggleSelectAll}
+                    />
+                  </th>
                   <th style={{ width: '25%' }}>Platform</th>
                   <th style={{ width: '20%' }}>Model Code</th>
                   <th>Description</th>
-                  <th style={{ textAlign: 'right', width: 100 }}>Actions</th>
+                  <th style={{ textAlign: 'right', width: 120 }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {Object.entries(groupedMappings).map(([platform, items]) => (
                   <React.Fragment key={platform}>
                     <tr className="master-group-row">
+                      <td />
                       <td colSpan={4}>
                         {platform} ({items.length})
                       </td>
                     </tr>
                     {items.map(m => (
-                      <tr key={m.id}>
+                      <tr key={m.id} className={selectedIds.has(m.id) ? 'master-row-selected' : ''}>
+                        <td>
+                          <input
+                            type="checkbox"
+                            className="master-checkbox"
+                            checked={selectedIds.has(m.id)}
+                            onChange={() => toggleSelect(m.id)}
+                          />
+                        </td>
                         <td style={{ paddingLeft: 32 }}>{m.platform_name}</td>
                         <td>
                           <span className="model-code-badge">{m.model_code}</span>
                         </td>
                         <td>{m.description || 'No description'}</td>
                         <td style={{ textAlign: 'right' }}>
-                          <button className="btn-danger" onClick={() => handleDelete(m.id)}>
-                            Delete
-                          </button>
+                          <div className="master-action-btns">
+                            <button className="btn-icon-edit" onClick={() => openEdit(m)} title="Edit">
+                              <Pencil size={14} />
+                            </button>
+                            <button className="btn-icon-delete" onClick={() => handleDelete(m.id)} title="Delete">
+                              <Trash2 size={14} />
+                            </button>
+                          </div>
                         </td>
                       </tr>
                     ))}
@@ -178,6 +292,52 @@ export default function MasterData() {
         </div>
 
       </div>
+
+      {/* ── Edit Modal ─────────────────────────────────────────────────────── */}
+      {editItem && (
+        <div className="modal-overlay" onClick={closeEdit}>
+          <div className="modal-box" onClick={e => e.stopPropagation()}>
+            <h3 className="modal-title">Edit Mapping</h3>
+            <div className="modal-fields">
+              <div className="master-form-field">
+                <label className="section-label">Platform Name</label>
+                <input
+                  className="field-input"
+                  value={editPlatform}
+                  onChange={e => setEditPlatform(e.target.value)}
+                  placeholder="e.g. THAR ROXX"
+                />
+              </div>
+              <div className="master-form-field">
+                <label className="section-label">Model Code</label>
+                <input
+                  className="field-input"
+                  value={editCode}
+                  onChange={e => setEditCode(e.target.value)}
+                  placeholder="e.g. AM4CRE..."
+                />
+              </div>
+              <div className="master-form-field">
+                <label className="section-label">Description</label>
+                <input
+                  className="field-input"
+                  value={editDesc}
+                  onChange={e => setEditDesc(e.target.value)}
+                  placeholder="Brief description"
+                />
+              </div>
+            </div>
+            <div className="modal-actions">
+              <button className="btn-secondary" onClick={closeEdit} disabled={editSaving}>
+                Cancel
+              </button>
+              <button className="btn-primary" onClick={handleEditSave} disabled={editSaving}>
+                {editSaving ? 'Saving...' : 'Save Changes'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
