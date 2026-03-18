@@ -164,6 +164,15 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         "android/app/src/main/res/drawable/launch_background.xml": "launch_background.xml.j2",
     }
 
+    # Android mipmap icon sizes: density -> (width, height)
+    MIPMAP_SIZES = {
+        "mipmap-mdpi":    (48,  48),
+        "mipmap-hdpi":    (72,  72),
+        "mipmap-xhdpi":   (96,  96),
+        "mipmap-xxhdpi":  (144, 144),
+        "mipmap-xxxhdpi": (192, 192),
+    }
+
     # Fetch all master mappings for generic VIN decoding
     from app.queries import MasterDataQueries
     from app.connectors.state_db import StateDBConnector
@@ -207,6 +216,25 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
 
         # Add master data for generic decoding
         zf.writestr(f"{root}/assets/master_data.json", json.dumps(master_data_manifest, indent=2))
+
+        # Bundle Android launcher icons for each mipmap density
+        icon_src = TEMPLATES_DIR / "icons" / "ic_launcher.png"
+        if icon_src.exists():
+            try:
+                from PIL import Image
+                import io as _io
+                with Image.open(icon_src) as img:
+                    img = img.convert("RGBA")
+                    for density, (w, h) in MIPMAP_SIZES.items():
+                        resized = img.resize((w, h), Image.LANCZOS)
+                        buf_icon = _io.BytesIO()
+                        resized.save(buf_icon, format="PNG")
+                        zf.writestr(
+                            f"{root}/android/app/src/main/res/{density}/ic_launcher.png",
+                            buf_icon.getvalue(),
+                        )
+            except Exception as e:
+                print(f"Warning: Could not process app icon: {e}")
 
         # Bundle reference images into the app assets
         from app.config import settings as app_settings
