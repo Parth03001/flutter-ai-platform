@@ -125,8 +125,8 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
 
       final String raw = code.trim();
 
-      // Step 1: Validate total length must be exactly 35
-      if (raw.length != 35) {
+      // Step 1: Validate total length must be between 30 and 35 (inclusive)
+      if (raw.length < 30 || raw.length > 35) {
         setState(() => _isProcessing = true);
         _showErrorDialog('Please scan the right VIN model code.');
         return;
