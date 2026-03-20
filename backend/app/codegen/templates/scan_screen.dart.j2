@@ -150,6 +150,7 @@ class _ScanScreenState extends State<ScanScreen> with WidgetsBindingObserver {
       }
 
       if (!mounted) return;
+      _scannerController.stop();
       Navigator.of(context).push(
         MaterialPageRoute(
           builder: (context) => HomeScreen(
