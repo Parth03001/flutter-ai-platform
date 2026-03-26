@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import 'package:drift/drift.dart' as drift;
 import 'inspection_camera_screen.dart';
 import 'history_screen.dart';
+import 'printer_discovery_screen.dart';
 import '../database/database.dart';
 
 class HomeScreen extends StatefulWidget {
@@ -163,7 +164,70 @@ class _HomeScreenState extends State<HomeScreen> {
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Inspection Persisted to Local Database!"), backgroundColor: Colors.green),
     );
-    Navigator.pop(context);
+
+    // Ask user if they want to print
+    final bool? wantsPrint = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(16)),
+        title: const Row(
+          children: [
+            Icon(Icons.print, color: Color(0xFFDC143C)),
+            SizedBox(width: 10),
+            Text('Print Report?', style: TextStyle(fontSize: 17)),
+          ],
+        ),
+        content: const Text(
+          'Would you like to print this inspection report?',
+          style: TextStyle(fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx, false),
+            child: const Text('Skip', style: TextStyle(color: Colors.grey)),
+          ),
+          ElevatedButton.icon(
+            onPressed: () => Navigator.pop(ctx, true),
+            icon: const Icon(Icons.print, size: 16),
+            label: const Text('Print'),
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFDC143C),
+              foregroundColor: Colors.white,
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(8)),
+            ),
+          ),
+        ],
+      ),
+    );
+
+    if (!mounted) return;
+
+    if (wantsPrint == true) {
+      // Build task list for the print service
+      final printTasks = List.generate(_tasks.length, (i) {
+        final result = _taskResults[i] ?? {};
+        return {
+          'taskName': _tasks[i]['name'] as String? ?? 'Task',
+          'success': result['success'] as bool? ?? false,
+          'detectedPart': result['className'] as String?,
+        };
+      });
+
+      await Navigator.push(
+        context,
+        MaterialPageRoute(
+          builder: (_) => PrinterDiscoveryScreen(
+            vin: widget.vin ?? 'UNKNOWN',
+            modelCode: widget.modelCode ?? 'UNKNOWN',
+            timestamp: DateTime.now().toIso8601String(),
+            overallSuccess: _taskResults.values.every((r) => r['success'] == true),
+            tasks: printTasks,
+          ),
+        ),
+      );
+    }
+
+    if (mounted) Navigator.pop(context);
   }
 
   Widget _buildSubmitConfirmDialog() {
