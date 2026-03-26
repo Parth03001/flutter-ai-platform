@@ -109,6 +109,28 @@ def injectFlutterExtension(p) {
     }
 }
 
+// Fix AGP 8.x: inject namespace for any library that omits it in build.gradle
+// (e.g. bluetooth_print). Namespace is derived from the package attribute in
+// the module's AndroidManifest.xml, which is the correct migration path.
+subprojects {
+    afterEvaluate { proj ->
+        if (proj.plugins.hasPlugin('com.android.library')) {
+            try {
+                def ns = proj.android.namespace
+                if (!ns) {
+                    def manifestFile = proj.file('src/main/AndroidManifest.xml')
+                    if (manifestFile.exists()) {
+                        def matcher = (manifestFile.text =~ /package="([^"]+)"/)
+                        if (matcher.find()) {
+                            proj.android.namespace = matcher.group(1)
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
+        }
+    }
+}
+
 rootProject.buildDir = '../build'
 subprojects {
     project.buildDir = "${rootProject.buildDir}/${project.name}"
