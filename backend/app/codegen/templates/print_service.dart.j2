@@ -76,7 +76,7 @@ class PrintService {
 
   /// Build a ZPL II label for the inspection report.
   ///
-  /// Designed for Zebra ZT411 at 203 dpi, 4-inch wide labels.
+  /// Designed for Zebra ZT411 at 300 dpi, 4-inch wide labels.
   /// Sends plain text over TCP port 9100 — no third-party package needed.
   String _buildZpl({
     required String vin,
@@ -86,74 +86,75 @@ class PrintService {
     required List<Map<String, dynamic>> tasks,
   }) {
     final buf = StringBuffer();
-    int y = 20;
+    int y = 30;
 
-    // Dynamic label height: header ~280 + 50 per task + footer 60
-    final labelHeight = 290 + (tasks.length * 52) + 70;
+    // 300 dpi: 4 in wide = 1200 dots
+    // Dynamic label height: header ~430 + 77 per task + footer 100
+    final labelHeight = 430 + (tasks.length * 77) + 100;
 
     buf.writeln('^XA');
-    buf.writeln('^PW800');          // Print width: 800 dots (≈ 4 in @ 203 dpi)
+    buf.writeln('^PW1200');          // Print width: 1200 dots (4 in @ 300 dpi)
     buf.writeln('^LL$labelHeight'); // Label length in dots
 
     // ── Title ────────────────────────────────────────────────────────────────
-    buf.writeln('^CF0,45');
-    buf.writeln('^FO40,$y^FDINSPECTION REPORT^FS');
-    y += 62;
+    buf.writeln('^CF0,65');
+    buf.writeln('^FO60,$y^FDINSPECTION REPORT^FS');
+    y += 90;
 
-    buf.writeln('^FO40,$y^GB720,3,3^FS');
-    y += 14;
+    buf.writeln('^FO60,$y^GB1060,4,4^FS');
+    y += 20;
 
     // ── Info fields ───────────────────────────────────────────────────────────
-    buf.writeln('^CF0,28');
-    buf.writeln('^FO40,$y^FDVIN   : $vin^FS');
-    y += 38;
-    buf.writeln('^FO40,$y^FDMODEL : $modelCode^FS');
-    y += 38;
-    buf.writeln('^FO40,$y^FDDATE  : $timestamp^FS');
-    y += 44;
+    buf.writeln('^CF0,40');
+    buf.writeln('^FO60,$y^FDVIN   : $vin^FS');
+    y += 56;
+    buf.writeln('^FO60,$y^FDMODEL : $modelCode^FS');
+    y += 56;
+    buf.writeln('^FO60,$y^FDDATE  : $timestamp^FS');
+    y += 65;
 
-    buf.writeln('^FO40,$y^GB720,3,3^FS');
-    y += 14;
+    buf.writeln('^FO60,$y^GB1060,4,4^FS');
+    y += 20;
 
     // ── Overall status ────────────────────────────────────────────────────────
-    buf.writeln('^CF0,40');
+    buf.writeln('^CF0,60');
     final statusText = overallSuccess ? '  [ PASSED ]' : '  [ FAILED ]';
     if (!overallSuccess) {
-      buf.writeln('^FO40,$y^FR^FD$statusText^FS'); // Reverse video for FAILED
+      buf.writeln('^FO60,$y^FR^FD$statusText^FS'); // Reverse video for FAILED
     } else {
-      buf.writeln('^FO40,$y^FD$statusText^FS');
+      buf.writeln('^FO60,$y^FD$statusText^FS');
     }
-    y += 58;
+    y += 85;
 
-    buf.writeln('^FO40,$y^GB720,3,3^FS');
-    y += 14;
+    buf.writeln('^FO60,$y^GB1060,4,4^FS');
+    y += 20;
 
     // ── Task results ──────────────────────────────────────────────────────────
-    buf.writeln('^CF0,26');
+    buf.writeln('^CF0,38');
     for (final task in tasks) {
       final success = task['success'] as bool? ?? false;
       final name = (task['taskName'] as String? ?? 'Task');
       final result = success ? 'PASS' : 'FAIL';
 
-      buf.writeln('^FO40,$y^FD$name : $result^FS');
-      y += 36;
+      buf.writeln('^FO60,$y^FD$name : $result^FS');
+      y += 53;
 
       final part = task['detectedPart'] as String?;
       if (part != null && part.isNotEmpty) {
-        buf.writeln('^CF0,22');
-        buf.writeln('^FO60,$y^FD> $part^FS');
-        buf.writeln('^CF0,26');
-        y += 30;
+        buf.writeln('^CF0,32');
+        buf.writeln('^FO80,$y^FD> $part^FS');
+        buf.writeln('^CF0,38');
+        y += 44;
       }
     }
 
-    y += 8;
-    buf.writeln('^FO40,$y^GB720,3,3^FS');
     y += 12;
+    buf.writeln('^FO60,$y^GB1060,4,4^FS');
+    y += 18;
 
     // ── Footer ────────────────────────────────────────────────────────────────
-    buf.writeln('^CF0,22');
-    buf.writeln('^FO40,$y^FDFlutter AI Inspection System^FS');
+    buf.writeln('^CF0,32');
+    buf.writeln('^FO60,$y^FDFlutter AI Inspection System^FS');
 
     buf.writeln('^XZ');
     return buf.toString();
