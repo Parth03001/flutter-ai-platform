@@ -25,63 +25,82 @@ class PrinterDiscoveryScreen extends StatefulWidget {
 class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
   final List<DiscoveredPrinter> _printers = [];
   bool _scanning = false;
-  int _scanProgress = 0;
-  int _scanTotal = 254;
   bool _printing = false;
-  final TextEditingController _ipController = TextEditingController();
+  String _statusMessage = '';
+  final TextEditingController _macController = TextEditingController();
 
   @override
   void initState() {
     super.initState();
-    _startScan();
+    _loadBondedDevices();
   }
 
   @override
   void dispose() {
-    _ipController.dispose();
+    _macController.dispose();
     super.dispose();
   }
 
-  Future<void> _startScan() async {
+  Future<void> _loadBondedDevices() async {
     setState(() {
       _printers.clear();
       _scanning = true;
-      _scanProgress = 0;
+      _statusMessage = 'Loading paired devices…';
     });
 
-    final found = await PrintService.instance.scanNetwork(
-      onProgress: (cur, total) {
-        if (mounted) setState(() {
-          _scanProgress = cur;
-          _scanTotal = total;
-        });
-      },
-    );
+    final bonded = await PrintService.instance.getBondedPrinters();
+
+    if (mounted) {
+      setState(() {
+        _printers.addAll(bonded);
+        _scanning = false;
+        _statusMessage = bonded.isEmpty
+            ? 'No paired devices found'
+            : '${bonded.length} paired device(s)';
+      });
+    }
+  }
+
+  Future<void> _discoverPrinters() async {
+    setState(() {
+      _printers.clear();
+      _scanning = true;
+      _statusMessage = 'Scanning for Zebra printers…';
+    });
+
+    final found = await PrintService.instance.discoverBluetoothPrinters();
 
     if (mounted) {
       setState(() {
         _printers.addAll(found);
         _scanning = false;
+        _statusMessage = found.isEmpty
+            ? 'No printers found. Try pairing first.'
+            : '${found.length} printer(s) found';
       });
     }
   }
 
-  void _addManualIp() {
-    final ip = _ipController.text.trim();
-    if (ip.isEmpty) return;
-    final parts = ip.split('.');
-    if (parts.length != 4 || parts.any((p) => int.tryParse(p) == null)) {
+  void _addManualMac() {
+    final mac = _macController.text.trim().toUpperCase();
+    if (mac.isEmpty) return;
+
+    // Validate MAC address format XX:XX:XX:XX:XX:XX
+    final macRegex = RegExp(r'^([0-9A-F]{2}:){5}[0-9A-F]{2}$');
+    if (!macRegex.hasMatch(mac)) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Enter a valid IPv4 address')),
+        const SnackBar(
+            content: Text('Enter a valid MAC address (e.g. C4:D3:6A:AC:F0:AE)')),
       );
       return;
     }
+
     setState(() {
-      if (!_printers.any((p) => p.address == ip)) {
-        _printers.add(DiscoveredPrinter(name: 'Printer @ $ip', address: ip));
+      if (!_printers.any((p) => p.address == mac)) {
+        _printers.add(DiscoveredPrinter(name: 'Printer @ $mac', address: mac));
       }
     });
-    _ipController.clear();
+    _macController.clear();
     FocusScope.of(context).unfocus();
   }
 
@@ -103,7 +122,7 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
     ScaffoldMessenger.of(context).showSnackBar(SnackBar(
       content: Text(ok
           ? 'Report printed successfully!'
-          : 'Print failed. Check printer connection.'),
+          : 'Print failed. Ensure printer is paired and in range.'),
       backgroundColor: ok ? Colors.green : Colors.red,
     ));
 
@@ -134,7 +153,7 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
             )
           : Column(
               children: [
-                // ── Scan header ─────────────────────────────────────────────
+                // ── Status bar ───────────────────────────────────────────────
                 Container(
                   padding: const EdgeInsets.symmetric(
                       horizontal: 16, vertical: 10),
@@ -150,59 +169,69 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
                               color: Color(0xFF7C5CFC)),
                         )
                       else
-                        const Icon(Icons.wifi,
+                        const Icon(Icons.bluetooth,
                             size: 16, color: Color(0xFF7C5CFC)),
                       const SizedBox(width: 10),
                       Expanded(
                         child: Text(
-                          _scanning
-                              ? 'Scanning network… ($_scanProgress / $_scanTotal)'
-                              : '${_printers.length} printer(s) found on network',
+                          _statusMessage,
                           style: const TextStyle(
                               color: Colors.white70, fontSize: 13),
                         ),
                       ),
-                      IconButton(
-                        icon: const Icon(Icons.refresh,
-                            color: Color(0xFF7C5CFC), size: 20),
-                        onPressed: _scanning ? null : _startScan,
-                        padding: EdgeInsets.zero,
-                        constraints: const BoxConstraints(),
-                        splashRadius: 18,
+                      // Paired devices button
+                      TextButton.icon(
+                        onPressed: _scanning ? null : _loadBondedDevices,
+                        icon: const Icon(Icons.bluetooth_connected,
+                            size: 14, color: Color(0xFF7C5CFC)),
+                        label: const Text('Paired',
+                            style: TextStyle(
+                                color: Color(0xFF7C5CFC), fontSize: 12)),
+                        style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 4)),
+                      ),
+                      // Discover button
+                      TextButton.icon(
+                        onPressed: _scanning ? null : _discoverPrinters,
+                        icon: const Icon(Icons.radar,
+                            size: 14, color: Color(0xFF7C5CFC)),
+                        label: const Text('Scan',
+                            style: TextStyle(
+                                color: Color(0xFF7C5CFC), fontSize: 12)),
+                        style: TextButton.styleFrom(
+                            padding: const EdgeInsets.symmetric(
+                                horizontal: 6, vertical: 4)),
                       ),
                     ],
                   ),
                 ),
                 if (_scanning)
-                  LinearProgressIndicator(
-                    value: _scanTotal > 0
-                        ? _scanProgress / _scanTotal
-                        : null,
+                  const LinearProgressIndicator(
                     minHeight: 3,
-                    backgroundColor: const Color(0xFF1A1A24),
-                    color: const Color(0xFF7C5CFC),
+                    backgroundColor: Color(0xFF1A1A24),
+                    color: Color(0xFF7C5CFC),
                   ),
 
-                // ── Manual IP entry ─────────────────────────────────────────
+                // ── Manual MAC entry ─────────────────────────────────────────
                 Padding(
                   padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
                   child: Row(
                     children: [
                       Expanded(
                         child: TextField(
-                          controller: _ipController,
+                          controller: _macController,
                           style: const TextStyle(
                               color: Colors.white, fontSize: 14),
-                          keyboardType: TextInputType.number,
-                          onSubmitted: (_) => _addManualIp(),
+                          textCapitalization: TextCapitalization.characters,
+                          onSubmitted: (_) => _addManualMac(),
                           decoration: InputDecoration(
-                            hintText:
-                                'Enter printer IP (e.g. 192.168.1.100)',
+                            hintText: 'Enter MAC (e.g. C4:D3:6A:AC:F0:AE)',
                             hintStyle: const TextStyle(
                                 color: Colors.grey, fontSize: 13),
                             filled: true,
                             fillColor: const Color(0xFF1A1A24),
-                            prefixIcon: const Icon(Icons.lan_outlined,
+                            prefixIcon: const Icon(Icons.bluetooth_searching,
                                 color: Colors.grey, size: 18),
                             contentPadding: const EdgeInsets.symmetric(
                                 horizontal: 12, vertical: 10),
@@ -223,7 +252,7 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
                       ),
                       const SizedBox(width: 8),
                       ElevatedButton(
-                        onPressed: _addManualIp,
+                        onPressed: _addManualMac,
                         style: ElevatedButton.styleFrom(
                           backgroundColor: const Color(0xFF7C5CFC),
                           padding: const EdgeInsets.symmetric(
@@ -237,7 +266,7 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
                   ),
                 ),
 
-                // ── Printer list ────────────────────────────────────────────
+                // ── Printer list ─────────────────────────────────────────────
                 Expanded(
                   child: _printers.isEmpty
                       ? Center(
@@ -249,15 +278,15 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
                                 Icon(
                                   _scanning
                                       ? Icons.radar
-                                      : Icons.print_disabled_outlined,
+                                      : Icons.bluetooth_disabled,
                                   size: 48,
                                   color: Colors.grey.withOpacity(0.4),
                                 ),
                                 const SizedBox(height: 12),
                                 Text(
                                   _scanning
-                                      ? 'Scanning local network on port 9100…'
-                                      : 'No printers found.\nEnter an IP manually or tap refresh.',
+                                      ? 'Searching for Bluetooth printers…'
+                                      : 'No printers found.\nPair your Zebra printer in Android Bluetooth settings,\nthen tap "Paired" — or enter the MAC address manually.',
                                   textAlign: TextAlign.center,
                                   style: const TextStyle(
                                       color: Colors.grey, fontSize: 13),
@@ -267,7 +296,8 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
                           ),
                         )
                       : ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                          padding:
+                              const EdgeInsets.fromLTRB(12, 4, 12, 12),
                           itemCount: _printers.length,
                           itemBuilder: (_, i) {
                             final p = _printers[i];
@@ -291,7 +321,7 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
                                         .withOpacity(0.12),
                                     shape: BoxShape.circle,
                                   ),
-                                  child: const Icon(Icons.lan_outlined,
+                                  child: const Icon(Icons.bluetooth,
                                       color: Color(0xFF7C5CFC), size: 20),
                                 ),
                                 title: Text(p.name,
@@ -300,7 +330,7 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
                                         fontWeight: FontWeight.w600,
                                         fontSize: 14)),
                                 subtitle: Text(
-                                    '${p.address}:${p.port}',
+                                    p.address,
                                     style: const TextStyle(
                                         color: Colors.grey, fontSize: 12)),
                                 trailing: ElevatedButton.icon(
