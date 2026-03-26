@@ -10,14 +10,12 @@ class DiscoveredPrinter {
   final String name;
   final String address;
   final PrintConnectionType type;
-  final bool isBle;
   final int port;
 
   const DiscoveredPrinter({
     required this.name,
     required this.address,
     required this.type,
-    this.isBle = false,
     this.port = 9100,
   });
 }
@@ -35,7 +33,6 @@ class PrintService {
           name: (device.name?.isNotEmpty == true ? device.name : device.address) ?? 'Unknown BT',
           address: device.address ?? '',
           type: PrintConnectionType.bluetooth,
-          isBle: device.isBle ?? false,
         );
       }
     } catch (e) {
@@ -123,7 +120,6 @@ class PrintService {
           model: BluetoothPrinterInput(
             name: printer.name,
             address: printer.address,
-            isBle: printer.isBle,
             autoConnect: false,
           ),
         );
