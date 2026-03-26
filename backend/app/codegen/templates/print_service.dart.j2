@@ -1,8 +1,8 @@
 import 'dart:io';
-import 'dart:typed_data';
+import 'dart:convert';
 import 'package:flutter/material.dart';
-import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 
+/// A printer discovered on the local network (TCP/IP, port 9100).
 class DiscoveredPrinter {
   final String name;
   final String address;
@@ -19,7 +19,9 @@ class PrintService {
   static final PrintService instance = PrintService._();
   PrintService._();
 
-  /// Scan the local WiFi subnet for ESC/POS printers on port 9100.
+  // ── Network discovery ─────────────────────────────────────────────────────
+
+  /// Scan the local WiFi subnet for printers listening on port 9100 (ZPL/raw).
   Future<List<DiscoveredPrinter>> scanNetwork({
     void Function(int current, int total)? onProgress,
   }) async {
@@ -70,7 +72,96 @@ class PrintService {
     return found;
   }
 
-  /// Print inspection report to a network ESC/POS printer via TCP on port 9100.
+  // ── ZPL label generation ──────────────────────────────────────────────────
+
+  /// Build a ZPL II label for the inspection report.
+  ///
+  /// Designed for Zebra ZT411 at 203 dpi, 4-inch wide labels.
+  /// Sends plain text over TCP port 9100 — no third-party package needed.
+  String _buildZpl({
+    required String vin,
+    required String modelCode,
+    required String timestamp,
+    required bool overallSuccess,
+    required List<Map<String, dynamic>> tasks,
+  }) {
+    final buf = StringBuffer();
+    int y = 20;
+
+    // Dynamic label height: header ~280 + 50 per task + footer 60
+    final labelHeight = 290 + (tasks.length * 52) + 70;
+
+    buf.writeln('^XA');
+    buf.writeln('^PW800');          // Print width: 800 dots (≈ 4 in @ 203 dpi)
+    buf.writeln('^LL$labelHeight'); // Label length in dots
+
+    // ── Title ────────────────────────────────────────────────────────────────
+    buf.writeln('^CF0,45');
+    buf.writeln('^FO40,$y^FDINSPECTION REPORT^FS');
+    y += 62;
+
+    buf.writeln('^FO40,$y^GB720,3,3^FS');
+    y += 14;
+
+    // ── Info fields ───────────────────────────────────────────────────────────
+    buf.writeln('^CF0,28');
+    buf.writeln('^FO40,$y^FDVIN   : $vin^FS');
+    y += 38;
+    buf.writeln('^FO40,$y^FDMODEL : $modelCode^FS');
+    y += 38;
+    buf.writeln('^FO40,$y^FDDATE  : $timestamp^FS');
+    y += 44;
+
+    buf.writeln('^FO40,$y^GB720,3,3^FS');
+    y += 14;
+
+    // ── Overall status ────────────────────────────────────────────────────────
+    buf.writeln('^CF0,40');
+    final statusText = overallSuccess ? '  [ PASSED ]' : '  [ FAILED ]';
+    if (!overallSuccess) {
+      buf.writeln('^FO40,$y^FR^FD$statusText^FS'); // Reverse video for FAILED
+    } else {
+      buf.writeln('^FO40,$y^FD$statusText^FS');
+    }
+    y += 58;
+
+    buf.writeln('^FO40,$y^GB720,3,3^FS');
+    y += 14;
+
+    // ── Task results ──────────────────────────────────────────────────────────
+    buf.writeln('^CF0,26');
+    for (final task in tasks) {
+      final success = task['success'] as bool? ?? false;
+      final name = (task['taskName'] as String? ?? 'Task');
+      final result = success ? 'PASS' : 'FAIL';
+
+      buf.writeln('^FO40,$y^FD$name : $result^FS');
+      y += 36;
+
+      final part = task['detectedPart'] as String?;
+      if (part != null && part.isNotEmpty) {
+        buf.writeln('^CF0,22');
+        buf.writeln('^FO60,$y^FD> $part^FS');
+        buf.writeln('^CF0,26');
+        y += 30;
+      }
+    }
+
+    y += 8;
+    buf.writeln('^FO40,$y^GB720,3,3^FS');
+    y += 12;
+
+    // ── Footer ────────────────────────────────────────────────────────────────
+    buf.writeln('^CF0,22');
+    buf.writeln('^FO40,$y^FDFlutter AI Inspection System^FS');
+
+    buf.writeln('^XZ');
+    return buf.toString();
+  }
+
+  // ── Print ─────────────────────────────────────────────────────────────────
+
+  /// Connect to [printer] via TCP, send ZPL label, then disconnect.
   Future<bool> printInspectionReport({
     required DiscoveredPrinter printer,
     required String vin,
@@ -80,77 +171,25 @@ class PrintService {
     required List<Map<String, dynamic>> tasks,
   }) async {
     try {
-      final profile = await CapabilityProfile.load();
-      final gen = Generator(PaperSize.mm80, profile);
-      List<int> bytes = [];
-
-      bytes += gen.text(
-        'INSPECTION REPORT',
-        styles: const PosStyles(
-          align: PosAlign.center,
-          bold: true,
-          height: PosTextSize.size2,
-          width: PosTextSize.size2,
-        ),
+      final zpl = _buildZpl(
+        vin: vin,
+        modelCode: modelCode,
+        timestamp: timestamp,
+        overallSuccess: overallSuccess,
+        tasks: tasks,
       );
-      bytes += gen.feed(1);
-      bytes += gen.hr();
-      bytes += gen.text('VIN    : $vin', styles: const PosStyles(bold: true));
-      bytes += gen.text('Model  : $modelCode');
-      bytes += gen.text('Date   : $timestamp');
-      bytes += gen.hr();
-      bytes += gen.text(
-        overallSuccess ? '  [ PASSED ]  ' : '  [ FAILED ]  ',
-        styles: PosStyles(
-          align: PosAlign.center,
-          bold: true,
-          reverse: !overallSuccess,
-        ),
-      );
-      bytes += gen.hr();
-
-      for (final task in tasks) {
-        final success = task['success'] as bool? ?? false;
-        final name = task['taskName'] as String? ?? 'Task';
-        bytes += gen.row([
-          PosColumn(text: name, width: 9),
-          PosColumn(
-            text: success ? 'PASS' : 'FAIL',
-            width: 3,
-            styles: const PosStyles(align: PosAlign.right, bold: true),
-          ),
-        ]);
-        final part = task['detectedPart'] as String?;
-        if (part != null && part.isNotEmpty) {
-          bytes += gen.text(
-            '  > $part',
-            styles: const PosStyles(fontType: PosFontType.fontB),
-          );
-        }
-      }
-
-      bytes += gen.hr();
-      bytes += gen.text(
-        'Flutter AI Inspection System',
-        styles: const PosStyles(
-          align: PosAlign.center,
-          fontType: PosFontType.fontB,
-        ),
-      );
-      bytes += gen.feed(3);
-      bytes += gen.cut();
 
       final socket = await Socket.connect(
         printer.address,
         printer.port,
         timeout: const Duration(seconds: 5),
       );
-      socket.add(Uint8List.fromList(bytes));
+      socket.add(utf8.encode(zpl));
       await socket.flush();
       await socket.close();
       return true;
     } catch (e) {
-      debugPrint('[PrintService] Print error: $e');
+      debugPrint('[PrintService] ZPL print error: $e');
       return false;
     }
   }
