@@ -1,0 +1,211 @@
+import 'dart:async';
+import 'dart:io';
+import 'package:flutter/material.dart';
+import 'package:flutter_pos_printer_platform_image_3/flutter_pos_printer_platform_image_3.dart';
+import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
+
+enum PrintConnectionType { bluetooth, network }
+
+class DiscoveredPrinter {
+  final String name;
+  final String address;
+  final PrintConnectionType type;
+  final bool isBle;
+  final int port;
+
+  const DiscoveredPrinter({
+    required this.name,
+    required this.address,
+    required this.type,
+    this.isBle = false,
+    this.port = 9100,
+  });
+}
+
+class PrintService {
+  static final PrintService instance = PrintService._();
+  PrintService._();
+
+  /// Scan for Bluetooth printers — emits devices as they are discovered.
+  Stream<DiscoveredPrinter> scanBluetooth() async* {
+    try {
+      await for (final device
+          in PrinterManager.instance.discovery(type: PrinterType.bluetooth)) {
+        yield DiscoveredPrinter(
+          name: (device.name?.isNotEmpty == true ? device.name : device.address) ?? 'Unknown BT',
+          address: device.address ?? '',
+          type: PrintConnectionType.bluetooth,
+          isBle: device.isBle ?? false,
+        );
+      }
+    } catch (e) {
+      debugPrint('[PrintService] BT scan error: $e');
+    }
+  }
+
+  /// Scan the local WiFi subnet for devices listening on port 9100 (ESC/POS).
+  Future<List<DiscoveredPrinter>> scanNetwork({
+    void Function(int current, int total)? onProgress,
+  }) async {
+    final found = <DiscoveredPrinter>[];
+    String? subnet;
+
+    try {
+      final interfaces =
+          await NetworkInterface.list(type: InternetAddressType.IPv4);
+      for (final iface in interfaces) {
+        for (final addr in iface.addresses) {
+          if (!addr.isLinkLocal && !addr.isLoopback) {
+            final parts = addr.address.split('.');
+            if (parts.length == 4) {
+              subnet = '${parts[0]}.${parts[1]}.${parts[2]}';
+              break;
+            }
+          }
+        }
+        if (subnet != null) break;
+      }
+    } catch (_) {}
+
+    if (subnet == null) return found;
+
+    const batchSize = 25;
+    const total = 254;
+    final addresses =
+        List.generate(total, (i) => '$subnet.${i + 1}');
+
+    for (int i = 0; i < addresses.length; i += batchSize) {
+      onProgress?.call(i, total);
+      final batch = addresses.sublist(
+          i, (i + batchSize).clamp(0, addresses.length));
+      final results = await Future.wait(batch.map((ip) async {
+        try {
+          final socket = await Socket.connect(
+            ip,
+            9100,
+            timeout: const Duration(milliseconds: 350),
+          );
+          await socket.close();
+          return DiscoveredPrinter(
+            name: 'Printer @ $ip',
+            address: ip,
+            type: PrintConnectionType.network,
+          );
+        } catch (_) {
+          return null;
+        }
+      }));
+      found.addAll(results.whereType<DiscoveredPrinter>());
+    }
+
+    onProgress?.call(total, total);
+    return found;
+  }
+
+  /// Connect to [printer] and print the inspection report.
+  Future<bool> printInspectionReport({
+    required DiscoveredPrinter printer,
+    required String vin,
+    required String modelCode,
+    required String timestamp,
+    required bool overallSuccess,
+    required List<Map<String, dynamic>> tasks,
+  }) async {
+    final pType = printer.type == PrintConnectionType.bluetooth
+        ? PrinterType.bluetooth
+        : PrinterType.network;
+
+    try {
+      // ── Connect ─────────────────────────────────────────────────────────
+      if (printer.type == PrintConnectionType.bluetooth) {
+        await PrinterManager.instance.connect(
+          type: PrinterType.bluetooth,
+          model: BluetoothPrinterInput(
+            name: printer.name,
+            address: printer.address,
+            isBle: printer.isBle,
+            autoConnect: false,
+          ),
+        );
+      } else {
+        await PrinterManager.instance.connect(
+          type: PrinterType.network,
+          model: TcpPrinterInput(ipAddress: printer.address),
+        );
+      }
+
+      // ── Build ESC/POS bytes ──────────────────────────────────────────────
+      final profile = await CapabilityProfile.load();
+      final gen = Generator(PaperSize.mm80, profile);
+      List<int> bytes = [];
+
+      bytes += gen.text(
+        'INSPECTION REPORT',
+        styles: const PosStyles(
+          align: PosAlign.center,
+          bold: true,
+          height: PosTextSize.size2,
+          width: PosTextSize.size2,
+        ),
+      );
+      bytes += gen.feed(1);
+      bytes += gen.hr();
+      bytes += gen.text('VIN    : $vin',
+          styles: const PosStyles(bold: true));
+      bytes += gen.text('Model  : $modelCode');
+      bytes += gen.text('Date   : $timestamp');
+      bytes += gen.hr();
+      bytes += gen.text(
+        overallSuccess ? '  [ PASSED ]  ' : '  [ FAILED ]  ',
+        styles: PosStyles(
+          align: PosAlign.center,
+          bold: true,
+          reverse: !overallSuccess,
+        ),
+      );
+      bytes += gen.hr();
+
+      for (final task in tasks) {
+        final success = task['success'] as bool? ?? false;
+        final name = (task['taskName'] as String? ?? 'Task');
+        final status = success ? 'PASS' : 'FAIL';
+        bytes += gen.row([
+          PosColumn(text: name, width: 9),
+          PosColumn(
+            text: status,
+            width: 3,
+            styles: const PosStyles(align: PosAlign.right, bold: true),
+          ),
+        ]);
+        final part = task['detectedPart'] as String?;
+        if (part != null && part.isNotEmpty) {
+          bytes += gen.text(
+            '  > $part',
+            styles: const PosStyles(fontType: PosFontType.fontB),
+          );
+        }
+      }
+
+      bytes += gen.hr();
+      bytes += gen.text(
+        'Flutter AI Inspection System',
+        styles: const PosStyles(
+            align: PosAlign.center, fontType: PosFontType.fontB),
+      );
+      bytes += gen.feed(3);
+      bytes += gen.cut();
+
+      // ── Send & disconnect ────────────────────────────────────────────────
+      await PrinterManager.instance.send(type: pType, bytes: bytes);
+      await Future.delayed(const Duration(milliseconds: 500));
+      PrinterManager.instance.disconnect(type: pType);
+      return true;
+    } catch (e) {
+      debugPrint('[PrintService] Print error: $e');
+      try {
+        PrinterManager.instance.disconnect(type: pType);
+      } catch (_) {}
+      return false;
+    }
+  }
+}

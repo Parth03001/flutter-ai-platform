@@ -6,6 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../database/database.dart';
 import '../ml/detection_result.dart';
 import '../widgets/detection_overlay.dart';
+import 'printer_discovery_screen.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -122,6 +123,27 @@ class _HistoryScreenState extends State<HistoryScreen> {
                         subtitle: Text(
                           'Model: ${item['modelCode']} • ${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute}',
                           style: const TextStyle(fontSize: 11, color: Colors.grey),
+                        ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.print_outlined, color: Color(0xFFDC143C), size: 22),
+                              tooltip: 'Print Report',
+                              onPressed: () {
+                                Navigator.of(context).push(MaterialPageRoute(
+                                  builder: (_) => PrinterDiscoveryScreen(
+                                    vin: item['vin'] as String,
+                                    modelCode: item['modelCode'] as String,
+                                    timestamp: item['timestamp'] as String,
+                                    overallSuccess: overallSuccess,
+                                    tasks: List<Map<String, dynamic>>.from(tasks),
+                                  ),
+                                ));
+                              },
+                            ),
+                            const Icon(Icons.expand_more, color: Colors.grey),
+                          ],
                         ),
                         children: [
                           const Divider(height: 1),

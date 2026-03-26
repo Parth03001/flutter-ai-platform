@@ -137,6 +137,8 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         "lib/screens/component_config_screen.dart": "component_config_screen.dart.j2",
         "lib/screens/inspection_camera_screen.dart": "inspection_camera_screen.dart.j2",
         "lib/screens/history_screen.dart": "history_screen.dart.j2",
+        "lib/screens/printer_discovery_screen.dart": "printer_discovery_screen.dart.j2",
+        "lib/services/print_service.dart": "print_service.dart.j2",
         "lib/database/database.dart": "database.dart.j2",
         "lib/ml/detector.dart": "detector.dart.j2",
         "lib/ml/detection_result.dart": "detection_result.dart.j2",

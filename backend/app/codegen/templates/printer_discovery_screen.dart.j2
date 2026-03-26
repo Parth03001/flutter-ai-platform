@@ -1,0 +1,488 @@
+import 'dart:async';
+import 'package:flutter/material.dart';
+import '../services/print_service.dart';
+
+class PrinterDiscoveryScreen extends StatefulWidget {
+  final String vin;
+  final String modelCode;
+  final String timestamp;
+  final bool overallSuccess;
+  final List<Map<String, dynamic>> tasks;
+
+  const PrinterDiscoveryScreen({
+    super.key,
+    required this.vin,
+    required this.modelCode,
+    required this.timestamp,
+    required this.overallSuccess,
+    required this.tasks,
+  });
+
+  @override
+  State<PrinterDiscoveryScreen> createState() =>
+      _PrinterDiscoveryScreenState();
+}
+
+class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen>
+    with SingleTickerProviderStateMixin {
+  late final TabController _tabController;
+
+  // ── Bluetooth state ───────────────────────────────────────────────────────
+  final List<DiscoveredPrinter> _btPrinters = [];
+  bool _btScanning = false;
+  StreamSubscription<DiscoveredPrinter>? _btSub;
+
+  // ── Network state ─────────────────────────────────────────────────────────
+  final List<DiscoveredPrinter> _netPrinters = [];
+  bool _netScanning = false;
+  int _scanProgress = 0;
+  int _scanTotal = 254;
+  final TextEditingController _ipController = TextEditingController();
+
+  // ── Printing state ────────────────────────────────────────────────────────
+  bool _printing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _tabController = TabController(length: 2, vsync: this);
+    _tabController.addListener(_onTabChanged);
+    _startBluetoothScan();
+  }
+
+  @override
+  void dispose() {
+    _btSub?.cancel();
+    _tabController.removeListener(_onTabChanged);
+    _tabController.dispose();
+    _ipController.dispose();
+    super.dispose();
+  }
+
+  void _onTabChanged() {
+    if (_tabController.index == 1 &&
+        _netPrinters.isEmpty &&
+        !_netScanning) {
+      _startNetworkScan();
+    }
+  }
+
+  // ── Bluetooth ─────────────────────────────────────────────────────────────
+
+  void _startBluetoothScan() {
+    _btSub?.cancel();
+    setState(() {
+      _btPrinters.clear();
+      _btScanning = true;
+    });
+
+    _btSub = PrintService.instance.scanBluetooth().listen(
+      (printer) {
+        if (!mounted) return;
+        setState(() {
+          if (!_btPrinters.any((p) => p.address == printer.address)) {
+            _btPrinters.add(printer);
+          }
+        });
+      },
+      onDone: () {
+        if (mounted) setState(() => _btScanning = false);
+      },
+      onError: (_) {
+        if (mounted) setState(() => _btScanning = false);
+      },
+    );
+
+    // Auto-stop after 15 s
+    Future.delayed(const Duration(seconds: 15), () {
+      if (mounted && _btScanning) {
+        _btSub?.cancel();
+        setState(() => _btScanning = false);
+      }
+    });
+  }
+
+  // ── Network ───────────────────────────────────────────────────────────────
+
+  Future<void> _startNetworkScan() async {
+    setState(() {
+      _netPrinters.clear();
+      _netScanning = true;
+      _scanProgress = 0;
+    });
+
+    final printers = await PrintService.instance.scanNetwork(
+      onProgress: (cur, total) {
+        if (mounted) setState(() {
+          _scanProgress = cur;
+          _scanTotal = total;
+        });
+      },
+    );
+
+    if (mounted) {
+      setState(() {
+        _netPrinters.addAll(printers);
+        _netScanning = false;
+      });
+    }
+  }
+
+  void _addManualIp() {
+    final ip = _ipController.text.trim();
+    if (ip.isEmpty) return;
+    final parts = ip.split('.');
+    if (parts.length != 4 || parts.any((p) => int.tryParse(p) == null)) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Enter a valid IPv4 address')),
+      );
+      return;
+    }
+    setState(() {
+      if (!_netPrinters.any((p) => p.address == ip)) {
+        _netPrinters.add(DiscoveredPrinter(
+          name: 'Printer @ $ip',
+          address: ip,
+          type: PrintConnectionType.network,
+        ));
+      }
+    });
+    _ipController.clear();
+    FocusScope.of(context).unfocus();
+  }
+
+  // ── Print ─────────────────────────────────────────────────────────────────
+
+  Future<void> _printTo(DiscoveredPrinter printer) async {
+    setState(() => _printing = true);
+
+    final ok = await PrintService.instance.printInspectionReport(
+      printer: printer,
+      vin: widget.vin,
+      modelCode: widget.modelCode,
+      timestamp: widget.timestamp,
+      overallSuccess: widget.overallSuccess,
+      tasks: widget.tasks,
+    );
+
+    if (!mounted) return;
+    setState(() => _printing = false);
+
+    ScaffoldMessenger.of(context).showSnackBar(SnackBar(
+      content: Text(
+          ok ? 'Report printed successfully!' : 'Print failed. Check connection.'),
+      backgroundColor: ok ? Colors.green : Colors.red,
+    ));
+
+    if (ok && mounted) Navigator.of(context).pop();
+  }
+
+  // ── UI ────────────────────────────────────────────────────────────────────
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFF0F0F13),
+      appBar: AppBar(
+        backgroundColor: const Color(0xFF1A1A24),
+        title: const Text('Select Printer',
+            style: TextStyle(color: Colors.white, fontSize: 16)),
+        iconTheme: const IconThemeData(color: Colors.white),
+        bottom: TabBar(
+          controller: _tabController,
+          indicatorColor: const Color(0xFF7C5CFC),
+          labelColor: const Color(0xFF7C5CFC),
+          unselectedLabelColor: Colors.grey,
+          tabs: const [
+            Tab(icon: Icon(Icons.bluetooth), text: 'Bluetooth'),
+            Tab(icon: Icon(Icons.wifi), text: 'WiFi / IP'),
+          ],
+        ),
+      ),
+      body: _printing
+          ? const Center(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  CircularProgressIndicator(color: Color(0xFF7C5CFC)),
+                  SizedBox(height: 16),
+                  Text('Sending to printer…',
+                      style: TextStyle(color: Colors.white70)),
+                ],
+              ),
+            )
+          : TabBarView(
+              controller: _tabController,
+              children: [
+                _buildBluetoothTab(),
+                _buildNetworkTab(),
+              ],
+            ),
+    );
+  }
+
+  // ── Bluetooth tab ─────────────────────────────────────────────────────────
+
+  Widget _buildBluetoothTab() {
+    return Column(
+      children: [
+        _ScanHeader(
+          isScanning: _btScanning,
+          label: _btScanning
+              ? 'Scanning for Bluetooth printers…'
+              : '${_btPrinters.length} printer(s) found',
+          onRefresh: _startBluetoothScan,
+        ),
+        Expanded(
+          child: _btPrinters.isEmpty
+              ? _EmptyState(
+                  isScanning: _btScanning,
+                  scanningText: 'Searching nearby devices…',
+                  emptyText:
+                      'No Bluetooth printers found.\nMake sure your printer is on and discoverable.',
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.all(12),
+                  itemCount: _btPrinters.length,
+                  itemBuilder: (_, i) => _PrinterTile(
+                    printer: _btPrinters[i],
+                    onPrint: () => _printTo(_btPrinters[i]),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+
+  // ── Network tab ───────────────────────────────────────────────────────────
+
+  Widget _buildNetworkTab() {
+    return Column(
+      children: [
+        _ScanHeader(
+          isScanning: _netScanning,
+          label: _netScanning
+              ? 'Scanning… ($_scanProgress / $_scanTotal)'
+              : '${_netPrinters.length} printer(s) found',
+          onRefresh: _startNetworkScan,
+        ),
+        if (_netScanning)
+          LinearProgressIndicator(
+            value: _scanTotal > 0 ? _scanProgress / _scanTotal : null,
+            minHeight: 3,
+            backgroundColor: const Color(0xFF1A1A24),
+            color: const Color(0xFF7C5CFC),
+          ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(12, 12, 12, 4),
+          child: Row(
+            children: [
+              Expanded(
+                child: TextField(
+                  controller: _ipController,
+                  style: const TextStyle(color: Colors.white, fontSize: 14),
+                  keyboardType: TextInputType.number,
+                  onSubmitted: (_) => _addManualIp(),
+                  decoration: InputDecoration(
+                    hintText: 'Enter IP manually (e.g. 192.168.1.100)',
+                    hintStyle:
+                        const TextStyle(color: Colors.grey, fontSize: 13),
+                    filled: true,
+                    fillColor: const Color(0xFF1A1A24),
+                    contentPadding: const EdgeInsets.symmetric(
+                        horizontal: 12, vertical: 10),
+                    border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: Color(0xFF2E2E40))),
+                    enabledBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: Color(0xFF2E2E40))),
+                    focusedBorder: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(8),
+                        borderSide:
+                            const BorderSide(color: Color(0xFF7C5CFC))),
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              ElevatedButton(
+                onPressed: _addManualIp,
+                style: ElevatedButton.styleFrom(
+                  backgroundColor: const Color(0xFF7C5CFC),
+                  padding: const EdgeInsets.symmetric(
+                      horizontal: 14, vertical: 13),
+                  shape: RoundedRectangleBorder(
+                      borderRadius: BorderRadius.circular(8)),
+                ),
+                child: const Text('Add'),
+              ),
+            ],
+          ),
+        ),
+        Expanded(
+          child: _netPrinters.isEmpty
+              ? _EmptyState(
+                  isScanning: _netScanning,
+                  scanningText: 'Scanning local network on port 9100…',
+                  emptyText:
+                      'No network printers found.\nAdd an IP manually or tap refresh.',
+                )
+              : ListView.builder(
+                  padding: const EdgeInsets.fromLTRB(12, 4, 12, 12),
+                  itemCount: _netPrinters.length,
+                  itemBuilder: (_, i) => _PrinterTile(
+                    printer: _netPrinters[i],
+                    onPrint: () => _printTo(_netPrinters[i]),
+                  ),
+                ),
+        ),
+      ],
+    );
+  }
+}
+
+// ── Shared sub-widgets ────────────────────────────────────────────────────────
+
+class _ScanHeader extends StatelessWidget {
+  final bool isScanning;
+  final String label;
+  final VoidCallback onRefresh;
+
+  const _ScanHeader({
+    required this.isScanning,
+    required this.label,
+    required this.onRefresh,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+      color: const Color(0xFF1A1A24),
+      child: Row(
+        children: [
+          if (isScanning)
+            const SizedBox(
+              width: 14,
+              height: 14,
+              child: CircularProgressIndicator(
+                  strokeWidth: 2, color: Color(0xFF7C5CFC)),
+            )
+          else
+            const Icon(Icons.print_outlined,
+                size: 16, color: Color(0xFF7C5CFC)),
+          const SizedBox(width: 10),
+          Expanded(
+            child: Text(label,
+                style: const TextStyle(color: Colors.white70, fontSize: 13)),
+          ),
+          IconButton(
+            icon: const Icon(Icons.refresh,
+                color: Color(0xFF7C5CFC), size: 20),
+            onPressed: isScanning ? null : onRefresh,
+            padding: EdgeInsets.zero,
+            constraints: const BoxConstraints(),
+            splashRadius: 18,
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _EmptyState extends StatelessWidget {
+  final bool isScanning;
+  final String scanningText;
+  final String emptyText;
+
+  const _EmptyState({
+    required this.isScanning,
+    required this.scanningText,
+    required this.emptyText,
+  });
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24.0),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              isScanning ? Icons.radar : Icons.print_disabled_outlined,
+              size: 48,
+              color: Colors.grey.withOpacity(0.4),
+            ),
+            const SizedBox(height: 12),
+            Text(
+              isScanning ? scanningText : emptyText,
+              textAlign: TextAlign.center,
+              style: const TextStyle(color: Colors.grey, fontSize: 13),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _PrinterTile extends StatelessWidget {
+  final DiscoveredPrinter printer;
+  final VoidCallback onPrint;
+
+  const _PrinterTile({required this.printer, required this.onPrint});
+
+  @override
+  Widget build(BuildContext context) {
+    final isBt = printer.type == PrintConnectionType.bluetooth;
+    return Container(
+      margin: const EdgeInsets.only(bottom: 8),
+      decoration: BoxDecoration(
+        color: const Color(0xFF1A1A24),
+        borderRadius: BorderRadius.circular(10),
+        border: Border.all(color: const Color(0xFF2E2E40)),
+      ),
+      child: ListTile(
+        contentPadding:
+            const EdgeInsets.symmetric(horizontal: 12, vertical: 4),
+        leading: Container(
+          width: 40,
+          height: 40,
+          decoration: BoxDecoration(
+            color: const Color(0xFF7C5CFC).withOpacity(0.12),
+            shape: BoxShape.circle,
+          ),
+          child: Icon(
+            isBt ? Icons.bluetooth : Icons.lan_outlined,
+            color: const Color(0xFF7C5CFC),
+            size: 20,
+          ),
+        ),
+        title: Text(
+          printer.name,
+          style: const TextStyle(
+              color: Colors.white, fontWeight: FontWeight.w600, fontSize: 14),
+        ),
+        subtitle: Text(
+          printer.address,
+          style: const TextStyle(color: Colors.grey, fontSize: 12),
+        ),
+        trailing: ElevatedButton.icon(
+          onPressed: onPrint,
+          icon: const Icon(Icons.print, size: 15),
+          label: const Text('Print', style: TextStyle(fontSize: 13)),
+          style: ElevatedButton.styleFrom(
+            backgroundColor: const Color(0xFF7C5CFC),
+            padding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
+            shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(8)),
+          ),
+        ),
+      ),
+    );
+  }
+}
