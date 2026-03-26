@@ -1,76 +1,23 @@
-import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 import 'package:flutter/material.dart';
-import 'package:bluetooth_print/bluetooth_print.dart';
-import 'package:bluetooth_print/bluetooth_print_model.dart';
-// bluetooth_print uses Map<String, dynamic> for config (not a Config class)
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
-
-enum PrintConnectionType { bluetooth, network }
 
 class DiscoveredPrinter {
   final String name;
   final String address;
-  final PrintConnectionType type;
   final int port;
-  final BluetoothDevice? btDevice;
 
   const DiscoveredPrinter({
     required this.name,
     required this.address,
-    required this.type,
     this.port = 9100,
-    this.btDevice,
   });
 }
 
 class PrintService {
   static final PrintService instance = PrintService._();
   PrintService._();
-
-  StreamSubscription? _scanSub;
-
-  /// Start Bluetooth scan. Calls [onDeviceFound] per new device, [onDone] when finished.
-  void startBluetoothScan({
-    required void Function(DiscoveredPrinter) onDeviceFound,
-    required void Function() onDone,
-  }) {
-    final seen = <String>{};
-    _scanSub?.cancel();
-
-    BluetoothPrint.instance.startScan(
-      timeout: const Duration(seconds: 12),
-    );
-
-    _scanSub = BluetoothPrint.instance.scanResults.listen((devices) {
-      for (final d in devices) {
-        final addr = d.address ?? '';
-        if (addr.isNotEmpty && !seen.contains(addr)) {
-          seen.add(addr);
-          onDeviceFound(DiscoveredPrinter(
-            name: (d.name?.isNotEmpty == true ? d.name! : addr),
-            address: addr,
-            type: PrintConnectionType.bluetooth,
-            btDevice: d,
-          ));
-        }
-      }
-    });
-
-    Future.delayed(const Duration(seconds: 13), () {
-      stopBluetoothScan();
-      onDone();
-    });
-  }
-
-  void stopBluetoothScan() {
-    _scanSub?.cancel();
-    _scanSub = null;
-    try {
-      BluetoothPrint.instance.stopScan();
-    } catch (_) {}
-  }
 
   /// Scan the local WiFi subnet for ESC/POS printers on port 9100.
   Future<List<DiscoveredPrinter>> scanNetwork({
@@ -111,11 +58,7 @@ class PrintService {
           final socket = await Socket.connect(ip, 9100,
               timeout: const Duration(milliseconds: 350));
           await socket.close();
-          return DiscoveredPrinter(
-            name: 'Printer @ $ip',
-            address: ip,
-            type: PrintConnectionType.network,
-          );
+          return DiscoveredPrinter(name: 'Printer @ $ip', address: ip);
         } catch (_) {
           return null;
         }
@@ -127,130 +70,9 @@ class PrintService {
     return found;
   }
 
-  // ── Bluetooth printing via bluetooth_print ────────────────────────────────
-
-  Future<bool> _printBluetooth({
-    required BluetoothDevice device,
-    required String vin,
-    required String modelCode,
-    required String timestamp,
-    required bool overallSuccess,
-    required List<Map<String, dynamic>> tasks,
-  }) async {
-    try {
-      final connected = await BluetoothPrint.instance.connect(device);
-      if (connected != true) return false;
-
-      final config = <String, dynamic>{};
-      final List<LineText> list = [];
-
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: 'INSPECTION REPORT',
-        weight: 1,
-        align: LineText.ALIGN_CENTER,
-
-        linefeed: 1,
-      ));
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: '--------------------------------',
-        align: LineText.ALIGN_CENTER,
-        linefeed: 1,
-      ));
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: 'VIN: $vin',
-        weight: 1,
-        align: LineText.ALIGN_LEFT,
-        linefeed: 1,
-      ));
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: 'Model: $modelCode',
-        align: LineText.ALIGN_LEFT,
-        linefeed: 1,
-      ));
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: 'Date: $timestamp',
-        align: LineText.ALIGN_LEFT,
-        linefeed: 1,
-      ));
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: '--------------------------------',
-        align: LineText.ALIGN_CENTER,
-        linefeed: 1,
-      ));
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: overallSuccess ? '[ PASSED ]' : '[ FAILED ]',
-        weight: 1,
-        align: LineText.ALIGN_CENTER,
-
-        linefeed: 1,
-      ));
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: '--------------------------------',
-        align: LineText.ALIGN_CENTER,
-        linefeed: 1,
-      ));
-
-      for (final task in tasks) {
-        final success = task['success'] as bool? ?? false;
-        final name = task['taskName'] as String? ?? 'Task';
-        final status = success ? 'PASS' : 'FAIL';
-        list.add(LineText(
-          type: LineText.TYPE_TEXT,
-          content: '$name: $status',
-          weight: success ? 0 : 1,
-          align: LineText.ALIGN_LEFT,
-          linefeed: 1,
-        ));
-        final part = task['detectedPart'] as String?;
-        if (part != null && part.isNotEmpty) {
-          list.add(LineText(
-            type: LineText.TYPE_TEXT,
-            content: '  > $part',
-            align: LineText.ALIGN_LEFT,
-            linefeed: 1,
-          ));
-        }
-      }
-
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: '--------------------------------',
-        align: LineText.ALIGN_CENTER,
-        linefeed: 1,
-      ));
-      list.add(LineText(
-        type: LineText.TYPE_TEXT,
-        content: 'Flutter AI Inspection',
-        align: LineText.ALIGN_CENTER,
-        linefeed: 3,
-      ));
-
-      await BluetoothPrint.instance.printReceipt(config, list);
-      await Future.delayed(const Duration(milliseconds: 500));
-      await BluetoothPrint.instance.disconnect();
-      return true;
-    } catch (e) {
-      debugPrint('[PrintService] BT print error: $e');
-      try {
-        await BluetoothPrint.instance.disconnect();
-      } catch (_) {}
-      return false;
-    }
-  }
-
-  // ── Network printing via raw TCP socket + ESC/POS ─────────────────────────
-
-  Future<bool> _printNetwork({
-    required String ip,
-    required int port,
+  /// Print inspection report to a network ESC/POS printer via TCP on port 9100.
+  Future<bool> printInspectionReport({
+    required DiscoveredPrinter printer,
     required String vin,
     required String modelCode,
     required String timestamp,
@@ -318,47 +140,18 @@ class PrintService {
       bytes += gen.feed(3);
       bytes += gen.cut();
 
-      final socket =
-          await Socket.connect(ip, port, timeout: const Duration(seconds: 5));
+      final socket = await Socket.connect(
+        printer.address,
+        printer.port,
+        timeout: const Duration(seconds: 5),
+      );
       socket.add(Uint8List.fromList(bytes));
       await socket.flush();
       await socket.close();
       return true;
     } catch (e) {
-      debugPrint('[PrintService] Network print error: $e');
+      debugPrint('[PrintService] Print error: $e');
       return false;
     }
-  }
-
-  // ── Public entry point ────────────────────────────────────────────────────
-
-  Future<bool> printInspectionReport({
-    required DiscoveredPrinter printer,
-    required String vin,
-    required String modelCode,
-    required String timestamp,
-    required bool overallSuccess,
-    required List<Map<String, dynamic>> tasks,
-  }) async {
-    if (printer.type == PrintConnectionType.bluetooth &&
-        printer.btDevice != null) {
-      return _printBluetooth(
-        device: printer.btDevice!,
-        vin: vin,
-        modelCode: modelCode,
-        timestamp: timestamp,
-        overallSuccess: overallSuccess,
-        tasks: tasks,
-      );
-    }
-    return _printNetwork(
-      ip: printer.address,
-      port: printer.port,
-      vin: vin,
-      modelCode: modelCode,
-      timestamp: timestamp,
-      overallSuccess: overallSuccess,
-      tasks: tasks,
-    );
   }
 }
