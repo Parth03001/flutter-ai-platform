@@ -4,6 +4,7 @@ import 'dart:typed_data';
 import 'package:flutter/material.dart';
 import 'package:bluetooth_print/bluetooth_print.dart';
 import 'package:bluetooth_print/bluetooth_print_model.dart';
+// bluetooth_print uses Map<String, dynamic> for config (not a Config class)
 import 'package:esc_pos_utils_plus/esc_pos_utils_plus.dart';
 
 enum PrintConnectionType { bluetooth, network }
@@ -140,8 +141,7 @@ class PrintService {
       final connected = await BluetoothPrint.instance.connect(device);
       if (connected != true) return false;
 
-      final config = Config();
-      config.setPrinterType(Config.THERMAL);
+      final config = <String, dynamic>{};
       final List<LineText> list = [];
 
       list.add(LineText(
@@ -149,7 +149,7 @@ class PrintService {
         content: 'INSPECTION REPORT',
         weight: 1,
         align: LineText.ALIGN_CENTER,
-        fontZoom: 2,
+
         linefeed: 1,
       ));
       list.add(LineText(
@@ -188,7 +188,7 @@ class PrintService {
         content: overallSuccess ? '[ PASSED ]' : '[ FAILED ]',
         weight: 1,
         align: LineText.ALIGN_CENTER,
-        fontZoom: 2,
+
         linefeed: 1,
       ));
       list.add(LineText(
