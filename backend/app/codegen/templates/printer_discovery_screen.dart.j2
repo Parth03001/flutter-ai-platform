@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:permission_handler/permission_handler.dart';
 import '../services/print_service.dart';
 
 class PrinterDiscoveryScreen extends StatefulWidget {
@@ -41,12 +42,50 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
     super.dispose();
   }
 
+  /// Request BLUETOOTH_CONNECT + BLUETOOTH_SCAN at runtime (Android 12+).
+  /// Returns true if permissions are granted.
+  Future<bool> _ensureBluetoothPermissions() async {
+    final statuses = await [
+      Permission.bluetoothConnect,
+      Permission.bluetoothScan,
+    ].request();
+
+    final connectGranted =
+        statuses[Permission.bluetoothConnect]?.isGranted ?? false;
+    final scanGranted =
+        statuses[Permission.bluetoothScan]?.isGranted ?? false;
+
+    if (!connectGranted || !scanGranted) {
+      if (mounted) {
+        setState(() {
+          _scanning = false;
+          _statusMessage =
+              'Bluetooth permission denied. Grant it in App Settings.';
+        });
+        ScaffoldMessenger.of(context).showSnackBar(
+          SnackBar(
+            content: const Text(
+                'Bluetooth permission is required to find printers.'),
+            action: SnackBarAction(
+              label: 'Settings',
+              onPressed: openAppSettings,
+            ),
+          ),
+        );
+      }
+      return false;
+    }
+    return true;
+  }
+
   Future<void> _loadBondedDevices() async {
     setState(() {
       _printers.clear();
       _scanning = true;
       _statusMessage = 'Loading paired devices…';
     });
+
+    if (!await _ensureBluetoothPermissions()) return;
 
     final bonded = await PrintService.instance.getBondedPrinters();
 
@@ -67,6 +106,8 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen> {
       _scanning = true;
       _statusMessage = 'Scanning for Zebra printers…';
     });
+
+    if (!await _ensureBluetoothPermissions()) return;
 
     final found = await PrintService.instance.discoverBluetoothPrinters();
 
