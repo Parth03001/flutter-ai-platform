@@ -60,8 +60,14 @@ class PrintService {
 
   // ── ZPL label generation ──────────────────────────────────────────────────
 
+  /// Returns true if [value] is a real detected part (not null/empty/"None").
+  bool _hasValue(String? value) {
+    if (value == null) return false;
+    final v = value.trim().toLowerCase();
+    return v.isNotEmpty && v != 'none' && v != 'null' && v != 'n/a';
+  }
+
   /// Build a ZPL II label for the inspection report.
-  ///
   /// Designed for Zebra ZT411 at 300 dpi, 4-inch wide labels.
   String _buildZpl({
     required String vin,
@@ -70,72 +76,88 @@ class PrintService {
     required bool overallSuccess,
     required List<Map<String, dynamic>> tasks,
   }) {
-    final buf = StringBuffer();
-    int y = 30;
+    // Clean up ISO timestamp → "2026-03-26 15:46:09"
+    final cleanDate = timestamp
+        .replaceFirst('T', ' ')
+        .replaceAll(RegExp(r'\.\d+$'), '');
 
-    // 300 dpi: 4 in wide = 1200 dots
-    // Dynamic label height: header ~430 + 77 per task + footer 100
-    final labelHeight = 430 + (tasks.length * 77) + 100;
+    // Dynamic height:
+    //   header 88 + info+QR 210 + status 90 + tasks-header 65
+    //   + per-task 62 (+ 44 if has detail) + footer 60
+    int taskRows = 0;
+    for (final t in tasks) {
+      taskRows += 62 + 12; // row + divider
+      if (_hasValue(t['detectedPart'] as String?)) taskRows += 44;
+    }
+    final labelHeight = 88 + 210 + 90 + 65 + taskRows + 60;
+
+    final buf = StringBuffer();
+    int y = 0;
 
     buf.writeln('^XA');
-    buf.writeln('^PW1200');          // Print width: 1200 dots (4 in @ 300 dpi)
-    buf.writeln('^LL$labelHeight'); // Label length in dots
+    buf.writeln('^PW1200');
+    buf.writeln('^LL$labelHeight');
 
-    // ── Title ────────────────────────────────────────────────────────────────
-    buf.writeln('^CF0,65');
-    buf.writeln('^FO60,$y^FDINSPECTION REPORT^FS');
-    y += 90;
+    // ── Inverted header bar ───────────────────────────────────────────────────
+    buf.writeln('^FO0,$y^GB1200,88,88^FS');              // solid black rect
+    buf.writeln('^FO50,18^A0N,56,40^FR^FDINSPECTION REPORT^FS'); // white text
+    y = 98;
 
-    buf.writeln('^FO60,$y^GB1060,4,4^FS');
-    y += 20;
+    // ── Info (left) + QR code (right) ─────────────────────────────────────────
+    buf.writeln('^FO50,$y^A0N,42,30^FDVIN   : $vin^FS');
+    y += 58;
+    buf.writeln('^FO50,$y^A0N,42,30^FDMODEL : $modelCode^FS');
+    y += 58;
+    buf.writeln('^FO50,$y^A0N,36,25^FDDATE  : $cleanDate^FS');
 
-    // ── Info fields ───────────────────────────────────────────────────────────
-    buf.writeln('^CF0,40');
-    buf.writeln('^FO60,$y^FDVIN   : $vin^FS');
-    y += 56;
-    buf.writeln('^FO60,$y^FDMODEL : $modelCode^FS');
-    y += 56;
-    buf.writeln('^FO60,$y^FDDATE  : $timestamp^FS');
-    y += 65;
+    // QR code encoding VIN, placed top-right of info section
+    buf.writeln('^FO890,98^BQN,2,5^FDMA,$vin^FS');
 
-    buf.writeln('^FO60,$y^GB1060,4,4^FS');
-    y += 20;
+    y += 68;
 
-    // ── Overall status ────────────────────────────────────────────────────────
-    buf.writeln('^CF0,60');
-    final statusText = overallSuccess ? '  [ PASSED ]' : '  [ FAILED ]';
-    if (!overallSuccess) {
-      buf.writeln('^FO60,$y^FR^FD$statusText^FS'); // Reverse video for FAILED
+    // ── Status banner ─────────────────────────────────────────────────────────
+    buf.writeln('^FO0,$y^GB1200,5,5^FS');
+    y += 12;
+    if (overallSuccess) {
+      buf.writeln('^FO50,$y^GB480,70,6^FS');                  // outlined box
+      buf.writeln('^FO80,${y + 13}^A0N,46,34^FD  PASSED  ^FS');
     } else {
-      buf.writeln('^FO60,$y^FD$statusText^FS');
+      buf.writeln('^FO50,$y^GB480,70,70^FS');                 // filled box
+      buf.writeln('^FO80,${y + 13}^A0N,46,34^FR^FD  FAILED  ^FS'); // white text
     }
-    y += 85;
-
-    buf.writeln('^FO60,$y^GB1060,4,4^FS');
-    y += 20;
+    y += 84;
 
     // ── Task results ──────────────────────────────────────────────────────────
-    buf.writeln('^CF0,38');
+    buf.writeln('^FO0,$y^GB1200,5,5^FS');
+    y += 10;
+    buf.writeln('^FO50,$y^A0N,30,22^FDTASK RESULTS^FS');
+    y += 42;
+    buf.writeln('^FO0,$y^GB1200,3,3^FS');
+    y += 12;
+
     for (final task in tasks) {
       final success = task['success'] as bool? ?? false;
-      final name = (task['taskName'] as String? ?? 'Task');
+      final name = task['taskName'] as String? ?? 'Task';
       final result = success ? 'PASS' : 'FAIL';
 
-      buf.writeln('^FO60,$y^FD$name : $result^FS');
-      y += 53;
+      // Task name left-aligned, result right-aligned
+      buf.writeln('^FO50,$y^A0N,40,28^FD$name^FS');
+      buf.writeln('^FO1040,$y^A0N,40,28^FD$result^FS');
+      y += 54;
 
       final part = task['detectedPart'] as String?;
-      if (part != null && part.isNotEmpty) {
-        buf.writeln('^CF0,32');
-        buf.writeln('^FO80,$y^FD> $part^FS');
-        buf.writeln('^CF0,38');
+      if (_hasValue(part)) {
+        buf.writeln('^FO80,$y^A0N,32,23^FD> ${part!.trim()}^FS');
         y += 44;
       }
+
+      buf.writeln('^FO50,$y^GB1100,2,2^FS'); // thin row divider
+      y += 12;
     }
 
-    y += 12;
-    buf.writeln('^FO60,$y^GB1060,4,4^FS');
-    y += 18;
+    y += 6;
+    buf.writeln('^FO0,$y^GB1200,5,5^FS');
+    y += 10;
 
     // ── Footer ────────────────────────────────────────────────────────────────
     buf.writeln('^CF0,32');
