@@ -1,4 +1,3 @@
-import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/print_service.dart';
 
@@ -30,7 +29,6 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen>
   // ── Bluetooth state ───────────────────────────────────────────────────────
   final List<DiscoveredPrinter> _btPrinters = [];
   bool _btScanning = false;
-  StreamSubscription<DiscoveredPrinter>? _btSub;
 
   // ── Network state ─────────────────────────────────────────────────────────
   final List<DiscoveredPrinter> _netPrinters = [];
@@ -52,7 +50,7 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen>
 
   @override
   void dispose() {
-    _btSub?.cancel();
+    PrintService.instance.stopBluetoothScan();
     _tabController.removeListener(_onTabChanged);
     _tabController.dispose();
     _ipController.dispose();
@@ -70,14 +68,14 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen>
   // ── Bluetooth ─────────────────────────────────────────────────────────────
 
   void _startBluetoothScan() {
-    _btSub?.cancel();
+    PrintService.instance.stopBluetoothScan();
     setState(() {
       _btPrinters.clear();
       _btScanning = true;
     });
 
-    _btSub = PrintService.instance.scanBluetooth().listen(
-      (printer) {
+    PrintService.instance.startBluetoothScan(
+      onDeviceFound: (printer) {
         if (!mounted) return;
         setState(() {
           if (!_btPrinters.any((p) => p.address == printer.address)) {
@@ -88,18 +86,7 @@ class _PrinterDiscoveryScreenState extends State<PrinterDiscoveryScreen>
       onDone: () {
         if (mounted) setState(() => _btScanning = false);
       },
-      onError: (_) {
-        if (mounted) setState(() => _btScanning = false);
-      },
     );
-
-    // Auto-stop after 15 s
-    Future.delayed(const Duration(seconds: 15), () {
-      if (mounted && _btScanning) {
-        _btSub?.cancel();
-        setState(() => _btScanning = false);
-      }
-    });
   }
 
   // ── Network ───────────────────────────────────────────────────────────────
