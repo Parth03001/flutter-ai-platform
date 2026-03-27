@@ -86,80 +86,72 @@ class PrintService {
         ? <Map<String, dynamic>>[]
         : tasks.where((t) => t['success'] != true).toList();
 
-    // Dynamic height: header 88 + info+QR 160 + status 90
-    //   + (if failed: tasks-header 65 + per-task rows) + footer 60
+    // Dynamic height
     int taskRows = 0;
     for (final t in failedTasks) {
-      taskRows += 62 + 12;
-      if (_hasValue(t['detectedPart'] as String?)) taskRows += 44;
+      taskRows += 56 + 8;
+      if (_hasValue(t['detectedPart'] as String?)) taskRows += 40;
     }
-    final tasksSection = failedTasks.isEmpty ? 0 : 65 + taskRows;
-    final labelHeight = 88 + 160 + 90 + tasksSection + 60;
+    final tasksSection = failedTasks.isEmpty ? 0 : 60 + taskRows;
+    final labelHeight = 80 + 140 + 80 + tasksSection + 55;
 
     final buf = StringBuffer();
-    int y = 0;
+    int y = 20;
 
     buf.writeln('^XA');
     buf.writeln('^PW1200');
     buf.writeln('^LL$labelHeight');
 
-    // ── Inverted header bar ───────────────────────────────────────────────────
-    buf.writeln('^FO0,$y^GB1200,88,88^FS');
-    buf.writeln('^FO50,18^A0N,56,40^FR^FDINSPECTION REPORT^FS');
-    y = 98;
+    // ── Title ─────────────────────────────────────────────────────────────────
+    buf.writeln('^FO50,$y^A0N,62,44^FDINSPECTION REPORT^FS');
+    y += 75;
+    buf.writeln('^FO50,$y^GB1100,4,4^FS');
+    y += 18;
 
-    // ── Info (left) + QR code (right) — VIN and DATE only ────────────────────
+    // ── VIN and DATE only ─────────────────────────────────────────────────────
     buf.writeln('^FO50,$y^A0N,42,30^FDVIN  : $vin^FS');
-    y += 58;
-    buf.writeln('^FO50,$y^A0N,36,25^FDDATE : $cleanDate^FS');
+    y += 56;
+    buf.writeln('^FO50,$y^A0N,38,27^FDDATE : $cleanDate^FS');
+    y += 54;
+    buf.writeln('^FO50,$y^GB1100,4,4^FS');
+    y += 18;
 
-    // QR code encoding VIN, placed top-right of info section
-    buf.writeln('^FO890,98^BQN,2,5^FDMA,$vin^FS');
+    // ── Status ────────────────────────────────────────────────────────────────
+    final statusText = overallSuccess ? '[ PASSED ]' : '[ FAILED ]';
+    buf.writeln('^FO50,$y^A0N,60,44^FD$statusText^FS');
+    y += 75;
+    buf.writeln('^FO50,$y^GB1100,4,4^FS');
+    y += 18;
 
-    y += 68;
-
-    // ── Status banner ─────────────────────────────────────────────────────────
-    buf.writeln('^FO0,$y^GB1200,5,5^FS');
-    y += 12;
-    if (overallSuccess) {
-      buf.writeln('^FO50,$y^GB480,70,6^FS');                   // outlined box
-      buf.writeln('^FO80,${y + 13}^A0N,46,34^FD  PASSED  ^FS');
-    } else {
-      // Reverse-video text only (no solid fill) — matches earlier style
-      buf.writeln('^FO50,$y^A0N,60,44^FR^FD  [ FAILED ]  ^FS');
-    }
-    y += 84;
-
-    // ── Failed tasks only (hidden when all passed) ────────────────────────────
+    // ── Failed tasks only ─────────────────────────────────────────────────────
     if (failedTasks.isNotEmpty) {
-      buf.writeln('^FO0,$y^GB1200,5,5^FS');
-      y += 10;
-      buf.writeln('^FO50,$y^A0N,30,22^FDFAILED TASKS^FS');
-      y += 42;
-      buf.writeln('^FO0,$y^GB1200,3,3^FS');
+      buf.writeln('^FO50,$y^A0N,32,23^FDFAILED TASKS^FS');
+      y += 44;
+      buf.writeln('^FO50,$y^GB1100,2,2^FS');
       y += 12;
 
       for (final task in failedTasks) {
         final name = task['taskName'] as String? ?? 'Task';
-
-        buf.writeln('^FO50,$y^A0N,40,28^FD$name^FS');
-        buf.writeln('^FO1040,$y^A0N,40,28^FDFAIL^FS');
-        y += 54;
+        buf.writeln('^FO50,$y^A0N,38,27^FD$name^FS');
+        y += 50;
 
         final part = task['detectedPart'] as String?;
         if (_hasValue(part)) {
-          buf.writeln('^FO80,$y^A0N,32,23^FD> ${part!.trim()}^FS');
-          y += 44;
+          buf.writeln('^FO70,$y^A0N,30,22^FD> ${part!.trim()}^FS');
+          y += 40;
         }
 
         buf.writeln('^FO50,$y^GB1100,2,2^FS');
-        y += 12;
+        y += 8;
       }
+      y += 6;
     }
 
+    buf.writeln('^FO50,$y^GB1100,4,4^FS');
+    y += 14;
+
     // ── Footer ────────────────────────────────────────────────────────────────
-    buf.writeln('^CF0,32');
-    buf.writeln('^FO60,$y^FDFlutter AI Inspection System^FS');
+    buf.writeln('^FO50,$y^A0N,30,22^FDFlutter AI Inspection System^FS');
 
     buf.writeln('^XZ');
     return buf.toString();
