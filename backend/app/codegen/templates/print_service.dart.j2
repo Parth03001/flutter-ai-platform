@@ -81,15 +81,20 @@ class PrintService {
         .replaceFirst('T', ' ')
         .replaceAll(RegExp(r'\.\d+$'), '');
 
-    // Dynamic height:
-    //   header 88 + info+QR 210 + status 90 + tasks-header 65
-    //   + per-task 62 (+ 44 if has detail) + footer 60
+    // Only show failed tasks on the label
+    final failedTasks = overallSuccess
+        ? <Map<String, dynamic>>[]
+        : tasks.where((t) => t['success'] != true).toList();
+
+    // Dynamic height: header 88 + info+QR 160 + status 90
+    //   + (if failed: tasks-header 65 + per-task rows) + footer 60
     int taskRows = 0;
-    for (final t in tasks) {
-      taskRows += 62 + 12; // row + divider
+    for (final t in failedTasks) {
+      taskRows += 62 + 12;
       if (_hasValue(t['detectedPart'] as String?)) taskRows += 44;
     }
-    final labelHeight = 88 + 210 + 90 + 65 + taskRows + 60;
+    final tasksSection = failedTasks.isEmpty ? 0 : 65 + taskRows;
+    final labelHeight = 88 + 160 + 90 + tasksSection + 60;
 
     final buf = StringBuffer();
     int y = 0;
@@ -99,16 +104,14 @@ class PrintService {
     buf.writeln('^LL$labelHeight');
 
     // ── Inverted header bar ───────────────────────────────────────────────────
-    buf.writeln('^FO0,$y^GB1200,88,88^FS');              // solid black rect
-    buf.writeln('^FO50,18^A0N,56,40^FR^FDINSPECTION REPORT^FS'); // white text
+    buf.writeln('^FO0,$y^GB1200,88,88^FS');
+    buf.writeln('^FO50,18^A0N,56,40^FR^FDINSPECTION REPORT^FS');
     y = 98;
 
-    // ── Info (left) + QR code (right) ─────────────────────────────────────────
-    buf.writeln('^FO50,$y^A0N,42,30^FDVIN   : $vin^FS');
+    // ── Info (left) + QR code (right) — VIN and DATE only ────────────────────
+    buf.writeln('^FO50,$y^A0N,42,30^FDVIN  : $vin^FS');
     y += 58;
-    buf.writeln('^FO50,$y^A0N,42,30^FDMODEL : $modelCode^FS');
-    y += 58;
-    buf.writeln('^FO50,$y^A0N,36,25^FDDATE  : $cleanDate^FS');
+    buf.writeln('^FO50,$y^A0N,36,25^FDDATE : $cleanDate^FS');
 
     // QR code encoding VIN, placed top-right of info section
     buf.writeln('^FO890,98^BQN,2,5^FDMA,$vin^FS');
@@ -119,45 +122,40 @@ class PrintService {
     buf.writeln('^FO0,$y^GB1200,5,5^FS');
     y += 12;
     if (overallSuccess) {
-      buf.writeln('^FO50,$y^GB480,70,6^FS');                  // outlined box
+      buf.writeln('^FO50,$y^GB480,70,6^FS');                   // outlined box
       buf.writeln('^FO80,${y + 13}^A0N,46,34^FD  PASSED  ^FS');
     } else {
-      buf.writeln('^FO50,$y^GB480,70,70^FS');                 // filled box
-      buf.writeln('^FO80,${y + 13}^A0N,46,34^FR^FD  FAILED  ^FS'); // white text
+      // Reverse-video text only (no solid fill) — matches earlier style
+      buf.writeln('^FO50,$y^A0N,60,44^FR^FD  [ FAILED ]  ^FS');
     }
     y += 84;
 
-    // ── Task results ──────────────────────────────────────────────────────────
-    buf.writeln('^FO0,$y^GB1200,5,5^FS');
-    y += 10;
-    buf.writeln('^FO50,$y^A0N,30,22^FDTASK RESULTS^FS');
-    y += 42;
-    buf.writeln('^FO0,$y^GB1200,3,3^FS');
-    y += 12;
-
-    for (final task in tasks) {
-      final success = task['success'] as bool? ?? false;
-      final name = task['taskName'] as String? ?? 'Task';
-      final result = success ? 'PASS' : 'FAIL';
-
-      // Task name left-aligned, result right-aligned
-      buf.writeln('^FO50,$y^A0N,40,28^FD$name^FS');
-      buf.writeln('^FO1040,$y^A0N,40,28^FD$result^FS');
-      y += 54;
-
-      final part = task['detectedPart'] as String?;
-      if (_hasValue(part)) {
-        buf.writeln('^FO80,$y^A0N,32,23^FD> ${part!.trim()}^FS');
-        y += 44;
-      }
-
-      buf.writeln('^FO50,$y^GB1100,2,2^FS'); // thin row divider
+    // ── Failed tasks only (hidden when all passed) ────────────────────────────
+    if (failedTasks.isNotEmpty) {
+      buf.writeln('^FO0,$y^GB1200,5,5^FS');
+      y += 10;
+      buf.writeln('^FO50,$y^A0N,30,22^FDFAILED TASKS^FS');
+      y += 42;
+      buf.writeln('^FO0,$y^GB1200,3,3^FS');
       y += 12;
-    }
 
-    y += 6;
-    buf.writeln('^FO0,$y^GB1200,5,5^FS');
-    y += 10;
+      for (final task in failedTasks) {
+        final name = task['taskName'] as String? ?? 'Task';
+
+        buf.writeln('^FO50,$y^A0N,40,28^FD$name^FS');
+        buf.writeln('^FO1040,$y^A0N,40,28^FDFAIL^FS');
+        y += 54;
+
+        final part = task['detectedPart'] as String?;
+        if (_hasValue(part)) {
+          buf.writeln('^FO80,$y^A0N,32,23^FD> ${part!.trim()}^FS');
+          y += 44;
+        }
+
+        buf.writeln('^FO50,$y^GB1100,2,2^FS');
+        y += 12;
+      }
+    }
 
     // ── Footer ────────────────────────────────────────────────────────────────
     buf.writeln('^CF0,32');
