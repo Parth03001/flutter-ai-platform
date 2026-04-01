@@ -44,6 +44,8 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
   List<String> _debugLogs = [];
   bool _showDebugConsole = false;
 
+  bool _isFlashOn = false;
+
   List<DetectionResult> _allDetections = [];
   List<DetectionResult> _detectedNonTargetClasses = [];
   int _currentIndex = 0;
@@ -98,6 +100,9 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
+    if (_isFlashOn) {
+      _cameraController?.setFlashMode(FlashMode.off).catchError((_) {});
+    }
     _cameraController?.dispose();
     super.dispose();
   }
@@ -109,6 +114,10 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
       return;
     }
     if (state == AppLifecycleState.inactive) {
+      if (_isFlashOn) {
+        cameraController.setFlashMode(FlashMode.off).catchError((_) {});
+        setState(() => _isFlashOn = false);
+      }
       cameraController.dispose();
     } else if (state == AppLifecycleState.resumed) {
       _initializeCamera();
@@ -286,6 +295,18 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
     }
   }
 
+  Future<void> _toggleFlash() async {
+    if (_cameraController == null || !_isCameraInitialized) return;
+    final newFlashOn = !_isFlashOn;
+    try {
+      await _cameraController!.setFlashMode(newFlashOn ? FlashMode.torch : FlashMode.off);
+      setState(() => _isFlashOn = newFlashOn);
+      _addLog("Flash ${newFlashOn ? 'ON' : 'OFF'}");
+    } catch (e) {
+      _addLog("Flash error: $e");
+    }
+  }
+
   void _retake() {
     _addLog("Retake requested");
     setState(() { _capturedImageBytes = null; _capturedImageSize = null; _bestResult = null; _isAnalyzing = false; _allDetections = []; _detectedNonTargetClasses = []; });
@@ -415,6 +436,28 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
 
                     if (_isAnalyzing)
                       Container(color: Colors.black54, child: const Center(child: CircularProgressIndicator(color: Color(0xFFDC143C)))),
+
+                    // Flashlight toggle — visible only during live camera preview
+                    if (_capturedImageBytes == null && _isCameraInitialized)
+                      Positioned(
+                        top: 16, left: 16,
+                        child: GestureDetector(
+                          onTap: _toggleFlash,
+                          child: Container(
+                            width: 48, height: 48,
+                            decoration: BoxDecoration(
+                              color: _isFlashOn ? const Color(0xFFFFD700) : Colors.black54,
+                              shape: BoxShape.circle,
+                              border: Border.all(color: _isFlashOn ? const Color(0xFFFFD700) : Colors.white30, width: 1.5),
+                            ),
+                            child: Icon(
+                              _isFlashOn ? Icons.flashlight_on : Icons.flashlight_off,
+                              color: _isFlashOn ? Colors.black : Colors.white,
+                              size: 24,
+                            ),
+                          ),
+                        ),
+                      ),
 
                     // Top-right status badge
                     if (!_isAnalyzing && _capturedImageBytes != null)
