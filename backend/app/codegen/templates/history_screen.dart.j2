@@ -6,7 +6,7 @@ import 'package:shared_preferences/shared_preferences.dart';
 import '../database/database.dart';
 import '../ml/detection_result.dart';
 import '../widgets/detection_overlay.dart';
-import 'printer_discovery_screen.dart';
+import 'print_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -130,16 +130,43 @@ class _HistoryScreenState extends State<HistoryScreen> {
                             IconButton(
                               icon: const Icon(Icons.print_outlined, color: Color(0xFFDC143C), size: 22),
                               tooltip: 'Print Report',
-                              onPressed: () {
-                                Navigator.of(context).push(MaterialPageRoute(
-                                  builder: (_) => PrinterDiscoveryScreen(
-                                    vin: item['vin'] as String,
-                                    modelCode: item['modelCode'] as String,
-                                    timestamp: item['timestamp'] as String,
-                                    overallSuccess: overallSuccess,
-                                    tasks: List<Map<String, dynamic>>.from(tasks),
+                              onPressed: () async {
+                                final printers = await PrintService.instance.getBondedPrinters();
+                                if (!context.mounted) return;
+                                if (printers.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text("No paired printer found. Please pair a Bluetooth printer in device settings."),
+                                      backgroundColor: Colors.orange,
+                                      duration: Duration(seconds: 4),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text("Printing to ${printers.first.name}..."),
+                                    backgroundColor: Colors.blue,
+                                    duration: const Duration(seconds: 2),
                                   ),
-                                ));
+                                );
+                                final printSuccess = await PrintService.instance.printInspectionReport(
+                                  printer: printers.first,
+                                  vin: item['vin'] as String,
+                                  modelCode: item['modelCode'] as String,
+                                  timestamp: item['timestamp'] as String,
+                                  overallSuccess: overallSuccess,
+                                  tasks: List<Map<String, dynamic>>.from(tasks),
+                                );
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(printSuccess
+                                        ? "Report printed to ${printers.first.name}"
+                                        : "Print failed. Please check the printer."),
+                                    backgroundColor: printSuccess ? Colors.green : Colors.red,
+                                  ),
+                                );
                               },
                             ),
                             const Icon(Icons.expand_more, color: Colors.grey),
