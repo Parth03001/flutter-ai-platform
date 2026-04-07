@@ -133,7 +133,9 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
         return;
       }
       final backCamera = cameras.firstWhere((c) => c.lensDirection == CameraLensDirection.back, orElse: () => cameras.first);
-      final controller = CameraController(backCamera, ResolutionPreset.high, enableAudio: false);
+      // ResolutionPreset.medium (~720p) is sufficient for 640×640 model input and
+      // cuts JPEG decode time roughly in half vs. high (~1080p).
+      final controller = CameraController(backCamera, ResolutionPreset.medium, enableAudio: false);
       _cameraController = controller;
       await controller.initialize();
       if (mounted) setState(() => _isCameraInitialized = true);
@@ -155,11 +157,15 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
       final bytes = await image.readAsBytes();
 
       // Decode EXIF-corrected dimensions and run blur detection.
+      // We keep a reference to the oriented image so that inference can reuse it
+      // directly (predictImage), avoiding a second decode + bakeOrientation call.
       Size? imageSize;
+      img.Image? orientedImage; // reused by inference below
       try {
         final decoded = img.decodeImage(bytes);
         if (decoded != null) {
           final oriented = img.bakeOrientation(decoded);
+          orientedImage = oriented; // captured for inference
           imageSize = Size(oriented.width.toDouble(), oriented.height.toDouble());
 
           // Blur detection: Laplacian variance on a 150×150 thumbnail.
@@ -231,7 +237,11 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
       final List<String> targetClasses = List<String>.from(currentTask['classes'] ?? []);
       _addLog("Target: ${targetClasses.join(', ')}");
       
-      final allDetections = await ModelManager().predictBytes(bytes);
+      // Fast path: skip re-decode + re-orient by reusing the image from blur detection.
+      // Falls back to predictBytes (raw JPEG) if blur detection was skipped.
+      final allDetections = orientedImage != null
+          ? await ModelManager().predictImage(orientedImage)
+          : await ModelManager().predictBytes(bytes);
       setState(() => _allDetections = allDetections);
 
       // Persist captured image to device storage for history
