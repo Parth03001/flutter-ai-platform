@@ -4,6 +4,7 @@ import zipfile
 import io
 import shutil
 import json
+import time
 from pathlib import Path
 from app.tasks.celery_app import celery_app
 from app.config import settings
@@ -92,6 +93,78 @@ def _safe_extract(zip_bytes, extract_path):
         for member in zf.infolist():
             zf.extract(member, extract_path)
 
+def _force_delete_dir(path: Path, log_fn=None):
+    """
+    Reliably delete a directory on Windows.
+
+    shutil.rmtree(ignore_errors=True) silently leaves the directory intact when
+    Gradle / JVM processes hold file locks.  The stale project then accumulates
+    old .flutter-plugins-dependencies, Gradle caches, etc., causing build errors
+    that look unrelated to the actual code change (e.g. 'package jni does not
+    exist' because a previous build's plugin list is reused).
+
+    Strategy:
+      1. Stop Gradle daemons via gradlew --stop (releases build-dir locks).
+      2. Kill all remaining java.exe processes.
+      3. Retry shutil.rmtree up to 5 times with 2-second back-off.
+      4. Fall back to Windows 'rd /s /q' which is more forceful.
+      5. Raise clearly if the directory still cannot be removed.
+    """
+    if not path.exists():
+        return
+
+    def _log(msg):
+        if log_fn:
+            log_fn(msg)
+
+    # 1. Ask the Gradle daemon to stop so it releases its locks.
+    gradlew = path / "android" / "gradlew.bat"
+    if gradlew.exists():
+        try:
+            subprocess.run(
+                [str(gradlew), "--stop"],
+                cwd=str(path / "android"),
+                capture_output=True,
+                timeout=20,
+            )
+            time.sleep(2)
+        except Exception:
+            pass
+
+    # 2. Kill java.exe (covers any daemon that ignored --stop).
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "java.exe"], capture_output=True)
+        time.sleep(2)  # Give Windows time to release file handles
+    except Exception:
+        pass
+
+    # 3. Retry rmtree with back-off.
+    for attempt in range(5):
+        try:
+            shutil.rmtree(path)
+            return  # Deleted cleanly.
+        except Exception as exc:
+            _log(f"rmtree attempt {attempt + 1}/5 failed: {exc}\n")
+            time.sleep(2)
+
+    # 4. Last-resort: Windows rd command bypasses Python's file-handle checks.
+    try:
+        subprocess.run(
+            ["cmd", "/c", "rd", "/s", "/q", str(path)],
+            capture_output=True,
+            timeout=30,
+        )
+        time.sleep(1)
+    except Exception:
+        pass
+
+    if path.exists():
+        raise RuntimeError(
+            f"Cannot delete stale build directory after 5 retries: {path}\n"
+            "Please stop any running Gradle/Java processes and delete it manually,\n"
+            "then trigger a new build."
+        )
+
 @celery_app.task(bind=True, name="build_apk_task")
 def build_apk_task(self, app_id: str):
     """Generate code and build APK for the given app_id."""
@@ -122,18 +195,20 @@ def build_apk_task(self, app_id: str):
         zip_bytes = generate_flutter_project(app, all_model_assets=all_model_assets)
         
         # 2. Extract to export directory
-        _update_status(db, app_id, step="Preparing project workspace...", log_append="Extracting project files...\n")
+        _update_status(db, app_id, step="Preparing project workspace...", log_append="Cleaning previous build workspace...\n")
         export_root = Path(settings.exports_dir) / app_id
 
-        # Aggressive cleanup
-        try:
-            subprocess.run(["taskkill", "/F", "/IM", "java.exe"], capture_output=True)
-        except Exception: pass
+        # Force-delete the old directory so no stale files survive.
+        # shutil.rmtree(ignore_errors=True) silently fails on Windows when
+        # Gradle holds file locks, leaving old .flutter-plugins-dependencies
+        # and Gradle caches that cause "package jni does not exist" errors.
+        _force_delete_dir(
+            export_root,
+            log_fn=lambda msg: _update_status(db, app_id, log_append=msg),
+        )
 
-        if export_root.exists():
-            shutil.rmtree(export_root, ignore_errors=True)
-        
         export_root.mkdir(parents=True, exist_ok=True)
+        _update_status(db, app_id, step="Preparing project workspace...", log_append="Extracting project files...\n")
         _safe_extract(zip_bytes, export_root)
         project_dir = next(export_root.iterdir())
         
@@ -162,6 +237,12 @@ def build_apk_task(self, app_id: str):
         env["ANDROID_HOME"] = r"C:\android-sdk"
         env["PATH"] = f"C:\\jdk-17.0.14+7\\bin;C:\\flutter\\bin;C:\\android-sdk\\cmdline-tools\\latest\\bin;C:\\android-sdk\\platform-tools;{env.get('PATH', '')}"
         env["FLUTTER_ROOT"] = "C:\\flutter"
+
+        # flutter clean — wipe any Gradle / Dart build caches that may have
+        # survived an incomplete previous cleanup (e.g. cross-drive .gradle dirs).
+        # This is fast on a freshly extracted project but is a critical safety net.
+        _update_status(db, app_id, step="Fetching dependencies...", log_append="Running 'flutter clean'...\n")
+        _run_command_streaming(db, app_id, [flutter_path, "clean"], project_dir, env)
 
         # flutter pub get — must succeed to generate .flutter-plugins-dependencies
         # (which Gradle reads to produce GeneratedPluginRegistrant.java).
