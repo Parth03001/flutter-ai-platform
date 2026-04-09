@@ -5,6 +5,7 @@ import io
 import shutil
 import json
 import time
+import tempfile
 from pathlib import Path
 from app.tasks.celery_app import celery_app
 from app.config import settings
@@ -95,20 +96,26 @@ def _safe_extract(zip_bytes, extract_path):
 
 def _force_delete_dir(path: Path, log_fn=None):
     """
-    Reliably delete a directory on Windows.
+    Reliably delete a directory on Windows, including long-path scenarios.
 
-    shutil.rmtree(ignore_errors=True) silently leaves the directory intact when
-    Gradle / JVM processes hold file locks.  The stale project then accumulates
-    old .flutter-plugins-dependencies, Gradle caches, etc., causing build errors
-    that look unrelated to the actual code change (e.g. 'package jni does not
-    exist' because a previous build's plugin list is reused).
+    Two compounding problems on Windows:
+      1. shutil.rmtree(ignore_errors=True) silently fails when Gradle holds
+         file locks → stale .flutter-plugins-dependencies survives → next build
+         reuses the old plugin list (e.g. jni) → "package X does not exist".
+      2. Gradle creates deeply nested intermediates such as:
+           .../permission_handler_android/intermediates/javac/release/classes/
+             com/baseflow/permissionhandler/PermissionManagerShouldShowRequest...
+         These paths exceed Windows MAX_PATH (260 chars).  Both shutil.rmtree
+         and 'rd /s /q' fail with [WinError 3] on such paths.
 
-    Strategy:
-      1. Stop Gradle daemons via gradlew --stop (releases build-dir locks).
-      2. Kill all remaining java.exe processes.
-      3. Retry shutil.rmtree up to 5 times with 2-second back-off.
-      4. Fall back to Windows 'rd /s /q' which is more forceful.
-      5. Raise clearly if the directory still cannot be removed.
+    Strategy (Windows):
+      1. Stop Gradle daemon via 'gradlew --stop' to release build-dir locks.
+      2. Kill remaining java.exe and wait for handles to close.
+      3. Use robocopy /MIR to mirror an empty temp dir over the target —
+         robocopy uses the \\?\ long-path prefix internally, so it can empty
+         directories that exceed MAX_PATH where rmtree/rd cannot.
+      4. Now that the directory is empty, 'rd /s /q' removes the shell.
+      5. Raise clearly (not silently) if the directory still exists.
     """
     if not path.exists():
         return
@@ -138,30 +145,50 @@ def _force_delete_dir(path: Path, log_fn=None):
     except Exception:
         pass
 
-    # 3. Retry rmtree with back-off.
-    for attempt in range(5):
-        try:
-            shutil.rmtree(path)
-            return  # Deleted cleanly.
-        except Exception as exc:
-            _log(f"rmtree attempt {attempt + 1}/5 failed: {exc}\n")
-            time.sleep(2)
+    abs_path = str(path.resolve())
 
-    # 4. Last-resort: Windows rd command bypasses Python's file-handle checks.
-    try:
-        subprocess.run(
-            ["cmd", "/c", "rd", "/s", "/q", str(path)],
-            capture_output=True,
-            timeout=30,
-        )
-        time.sleep(1)
-    except Exception:
-        pass
+    if os.name == "nt":
+        # 3. robocopy /MIR: mirror an empty directory over the target.
+        #    This is the standard Windows trick for deleting trees with paths
+        #    longer than MAX_PATH — robocopy handles \\?\ prefixes internally.
+        try:
+            with tempfile.TemporaryDirectory() as empty_dir:
+                subprocess.run(
+                    [
+                        "robocopy", empty_dir, abs_path,
+                        "/MIR",   # mirror (delete everything in target)
+                        "/NFL",   # no file list
+                        "/NDL",   # no directory list
+                        "/NJH",   # no job header
+                        "/NJS",   # no job summary
+                        "/NC",    # no class
+                        "/NS",    # no size
+                    ],
+                    capture_output=True,
+                    timeout=120,
+                )
+        except Exception as exc:
+            _log(f"robocopy step failed (non-fatal): {exc}\n")
+
+        # 4. Remove the now-empty directory shell.
+        try:
+            subprocess.run(
+                ["cmd", "/c", "rd", "/s", "/q", abs_path],
+                capture_output=True,
+                timeout=30,
+            )
+            time.sleep(1)
+        except Exception:
+            pass
+    else:
+        # Non-Windows: plain rmtree is fine.
+        shutil.rmtree(path, ignore_errors=True)
 
     if path.exists():
         raise RuntimeError(
-            f"Cannot delete stale build directory after 5 retries: {path}\n"
-            "Please stop any running Gradle/Java processes and delete it manually,\n"
+            f"Cannot delete stale build directory: {path}\n"
+            "Please stop any running Gradle/Java processes, manually delete\n"
+            f"  {path}\n"
             "then trigger a new build."
         )
 
