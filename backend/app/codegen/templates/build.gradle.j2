@@ -5,17 +5,9 @@ ext {
     flutterTargetSdkVersion = 36
 }
 
-// FlutterLocalExtension is a typed Groovy class used as the 'flutter' Gradle
-// extension on every plugin subproject.  Using a Map instead breaks Kotlin DSL
-// (.kts) build files (e.g. flutter_plugin_android_lifecycle 2.0.34) because
-// Kotlin resolves 'flutter.compileSdkVersion' at compile time and can't find
-// the property on a plain Map.  A Groovy class automatically generates
-// JavaBean getters (getCompileSdkVersion() etc.) that Kotlin can resolve.
-class FlutterLocalExtension {
-    int compileSdkVersion = 0
-    int minSdkVersion     = 0
-    int targetSdkVersion  = 0
-}
+// FlutterLocalExtension is defined in buildSrc/src/main/groovy/ so it is
+// compiled before this script runs and is on the classpath for all build
+// scripts including Kotlin DSL (.kts) files in plugin subprojects.
 
 // Robustly load local.properties to get Flutter SDK path
 def getFlutterSdkPath() {

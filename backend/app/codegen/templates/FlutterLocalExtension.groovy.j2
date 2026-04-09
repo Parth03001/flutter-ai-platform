@@ -1,0 +1,20 @@
+/**
+ * Flutter SDK version properties made available to ALL Gradle build scripts,
+ * including Kotlin DSL (.kts) files in plugin subprojects such as
+ * flutter_plugin_android_lifecycle 2.0.34.
+ *
+ * WHY buildSrc:
+ *   flutter_plugin_android_lifecycle 2.0.34 switched from Groovy build.gradle
+ *   to Kotlin build.gradle.kts.  Kotlin resolves 'flutter.compileSdkVersion'
+ *   at COMPILE TIME.  A class defined anywhere else (root build.gradle, etc.)
+ *   is not on the Kotlin compiler's classpath when it compiles subproject .kts
+ *   files, causing "Unresolved reference: compileSdkVersion".
+ *
+ *   buildSrc is the ONE place Gradle guarantees will be compiled first and
+ *   added to the classpath of every subsequent build script.
+ */
+class FlutterLocalExtension {
+    int compileSdkVersion = 0
+    int minSdkVersion     = 0
+    int targetSdkVersion  = 0
+}

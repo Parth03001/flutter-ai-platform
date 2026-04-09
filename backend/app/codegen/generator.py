@@ -160,6 +160,11 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         "android/gradle/wrapper/gradle-wrapper.jar": "gradle-wrapper.jar.raw",
         "android/gradlew": "gradlew.j2",
         "android/gradlew.bat": "gradlew.bat.j2",
+        # buildSrc: compiled before any build script, puts FlutterLocalExtension
+        # on the classpath so Kotlin DSL (.kts) plugin files can resolve
+        # flutter.compileSdkVersion at compile time.
+        "android/buildSrc/build.gradle": "buildSrc_build.gradle.j2",
+        "android/buildSrc/src/main/groovy/FlutterLocalExtension.groovy": "FlutterLocalExtension.groovy.j2",
         f"android/app/src/main/kotlin/{ctx['package_name'].replace('.', '/')}/MainActivity.kt": "MainActivity.kt.j2",
         "android/app/src/main/res/values/styles.xml": "styles.xml.j2",
 
