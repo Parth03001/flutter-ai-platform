@@ -5,6 +5,18 @@ ext {
     flutterTargetSdkVersion = 36
 }
 
+// FlutterLocalExtension is a typed Groovy class used as the 'flutter' Gradle
+// extension on every plugin subproject.  Using a Map instead breaks Kotlin DSL
+// (.kts) build files (e.g. flutter_plugin_android_lifecycle 2.0.34) because
+// Kotlin resolves 'flutter.compileSdkVersion' at compile time and can't find
+// the property on a plain Map.  A Groovy class automatically generates
+// JavaBean getters (getCompileSdkVersion() etc.) that Kotlin can resolve.
+class FlutterLocalExtension {
+    int compileSdkVersion = 0
+    int minSdkVersion     = 0
+    int targetSdkVersion  = 0
+}
+
 // Robustly load local.properties to get Flutter SDK path
 def getFlutterSdkPath() {
     def properties = new Properties()
@@ -69,29 +81,30 @@ subprojects {
 }
 
 def injectFlutterExtension(p) {
-    // ALSO inject a 'flutter' object into every project's extensions so it works for KTS files
-    // Use a conditional check to avoid "extension already registered" errors in projects 
-    // where the Flutter plugin is already applied (like the :app project).
-    // EXCLUSION: Skip the 'app' project as it officially applies the Flutter plugin.
+    // Register 'flutter' as a typed FlutterLocalExtension on the project so
+    // that both Groovy and Kotlin DSL (.kts) plugin build files can access
+    // flutter.compileSdkVersion / flutter.minSdkVersion / flutter.targetSdkVersion.
+    // Skip the :app project — it gets the real FlutterExtension from the plugin.
     if (p.name != "app" && p.extensions.findByName("flutter") == null) {
-        p.extensions.add("flutter", [
-            compileSdkVersion: rootProject.ext.flutterCompileSdkVersion,
-            minSdkVersion: rootProject.ext.flutterMinSdkVersion,
-            targetSdkVersion: rootProject.ext.flutterTargetSdkVersion
-        ])
+        def ext = new FlutterLocalExtension()
+        ext.compileSdkVersion = rootProject.ext.flutterCompileSdkVersion
+        ext.minSdkVersion     = rootProject.ext.flutterMinSdkVersion
+        ext.targetSdkVersion  = rootProject.ext.flutterTargetSdkVersion
+        p.extensions.add("flutter", ext)
     }
 
     if (p.hasProperty('android')) {
         p.android {
             compileSdkVersion rootProject.ext.flutterCompileSdkVersion
-            
-            // Ensure the 'flutter' extension exists on the android object too
+
+            // Also add flutter on the android extension for any plugin that
+            // accesses it as android.extensions.flutter rather than project.flutter.
             if (!p.android.extensions.findByName('flutter')) {
-                p.android.extensions.add('flutter', [
-                    compileSdkVersion: rootProject.ext.flutterCompileSdkVersion,
-                    minSdkVersion: rootProject.ext.flutterMinSdkVersion,
-                    targetSdkVersion: rootProject.ext.flutterTargetSdkVersion
-                ])
+                def androidExt = new FlutterLocalExtension()
+                androidExt.compileSdkVersion = rootProject.ext.flutterCompileSdkVersion
+                androidExt.minSdkVersion     = rootProject.ext.flutterMinSdkVersion
+                androidExt.targetSdkVersion  = rootProject.ext.flutterTargetSdkVersion
+                p.android.extensions.add('flutter', androidExt)
             }
         }
     }
