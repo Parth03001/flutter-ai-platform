@@ -29,10 +29,12 @@ plugins {
 
 include ":app"
 
-// --- RESTORING MANUAL OFFLINE PLUGIN BRIDGING ---
-def pubCache = "C:/Users/50014665/AppData/Local/Pub/Cache/hosted/pub.dev"
+// --- MANUAL OFFLINE PLUGIN BRIDGING ---
+// NOTE: variable is named pluginMap (not 'plugins') to avoid shadowing
+//       Gradle's built-in plugins{} DSL object which causes silent failures.
+def pubCacheDir = "C:/Users/50014665/AppData/Local/Pub/Cache/hosted/pub.dev"
 
-def plugins = [
+def pluginMap = [
     "camera_android": "camera_android-0.10.10+15",
     "camera_android_camerax": "camera_android_camerax-0.6.30",
     "permission_handler_android": "permission_handler_android-12.1.0",
@@ -45,7 +47,7 @@ def plugins = [
     "zsdk": "zsdk-5.0.0"
 ]
 
-plugins.each { name, folder ->
+pluginMap.each { name, folder ->
     include ":$name"
-    project(":$name").projectDir = new File(pubCache, "$folder/android")
+    project(":$name").projectDir = new File(pubCacheDir, "$folder/android")
 }
