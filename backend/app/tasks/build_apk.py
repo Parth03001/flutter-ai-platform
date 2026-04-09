@@ -163,9 +163,13 @@ def build_apk_task(self, app_id: str):
         env["PATH"] = f"C:\\jdk-17.0.14+7\\bin;C:\\flutter\\bin;C:\\android-sdk\\cmdline-tools\\latest\\bin;C:\\android-sdk\\platform-tools;{env.get('PATH', '')}"
         env["FLUTTER_ROOT"] = "C:\\flutter"
 
-        # flutter pub get
+        # flutter pub get — must succeed to generate .flutter-plugins-dependencies
+        # (which Gradle reads to produce GeneratedPluginRegistrant.java).
+        # If it fails silently the subsequent Gradle build will reference packages
+        # that don't exist in the compile classpath → "package X does not exist".
         _update_status(db, app_id, step="Fetching dependencies...", log_append="Running 'flutter pub get'...\n")
-        _run_command_streaming(db, app_id, [flutter_path, "pub", "get"], project_dir, env)
+        ret_pub = _run_command_streaming(db, app_id, [flutter_path, "pub", "get"], project_dir, env)
+        if ret_pub != 0: raise Exception(f"'flutter pub get' failed with exit code {ret_pub}. Check pubspec.yaml and network access.")
 
         # dart run build_runner
         dart_path = r"C:\flutter\bin\dart.bat"
