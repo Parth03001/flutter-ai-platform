@@ -45,13 +45,6 @@ allprojects {
         set("flutter.targetSdkVersion", rootProject.ext.flutterTargetSdkVersion)
     }
 
-    // ALSO inject a 'flutter' object into every project's extra properties
-    project.ext.flutter = [
-        compileSdkVersion: rootProject.ext.flutterCompileSdkVersion,
-        minSdkVersion: rootProject.ext.flutterMinSdkVersion,
-        targetSdkVersion: rootProject.ext.flutterTargetSdkVersion
-    ]
-
     // CRITICAL FIX: Add properties directly to subprojects so they are available during configuration
     if (project != rootProject) {
         project.configurations.all {
@@ -76,6 +69,18 @@ subprojects {
 }
 
 def injectFlutterExtension(p) {
+    // ALSO inject a 'flutter' object into every project's extensions so it works for KTS files
+    // Use a conditional check to avoid "extension already registered" errors in projects 
+    // where the Flutter plugin is already applied (like the :app project).
+    // EXCLUSION: Skip the 'app' project as it officially applies the Flutter plugin.
+    if (p.name != "app" && p.extensions.findByName("flutter") == null) {
+        p.extensions.add("flutter", [
+            compileSdkVersion: rootProject.ext.flutterCompileSdkVersion,
+            minSdkVersion: rootProject.ext.flutterMinSdkVersion,
+            targetSdkVersion: rootProject.ext.flutterTargetSdkVersion
+        ])
+    }
+
     if (p.hasProperty('android')) {
         p.android {
             compileSdkVersion rootProject.ext.flutterCompileSdkVersion
