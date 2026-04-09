@@ -17,4 +17,9 @@ class FlutterLocalExtension {
     int compileSdkVersion = 0
     int minSdkVersion     = 0
     int targetSdkVersion  = 0
+
+    // jni 1.0.0 android/build.gradle accesses flutter.mnSdkVersion
+    // (a typo for minSdkVersion — the 'i' is missing).
+    // Providing this alias prevents "No such property: mnSdkVersion" errors.
+    int getMnSdkVersion() { return minSdkVersion }
 }
