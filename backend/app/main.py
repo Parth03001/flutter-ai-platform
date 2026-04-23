@@ -2,6 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from app.api import models_router, apps_router, export_router, master_router
+from app.api import assets_router
 from app.config import settings
 from app.connectors.state_db import StateDBManager
 
@@ -10,6 +11,7 @@ async def lifespan(app: FastAPI):
     # Ensure data dirs exist
     settings.models_dir.mkdir(parents=True, exist_ok=True)
     settings.exports_dir.mkdir(parents=True, exist_ok=True)
+    settings.reference_images_dir.mkdir(parents=True, exist_ok=True)
     
     # Initialize PostgreSQL database
     db_manager = StateDBManager()
@@ -47,6 +49,7 @@ app.include_router(models_router.router, prefix="/api/v1")
 app.include_router(apps_router.router, prefix="/api/v1")
 app.include_router(export_router.router, prefix="/api/v1")
 app.include_router(master_router.router, prefix="/api/v1")
+app.include_router(assets_router.router, prefix="/api/v1")
 
 @app.get("/health")
 async def health():

@@ -1,6 +1,7 @@
 import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { getApp, getModels, buildAPK, downloadAPK, updateApp, uploadModel, getModelStatus, extractClasses, createApp, getMasterMappings } from '../api';
+import { getApp, getModels, buildAPK, downloadAPK, updateApp, uploadModel, getModelStatus, extractClasses, createApp, getMasterMappings, uploadReferenceImage, getReferenceImageUrl } from '../api';
+import ConfirmModal from './ConfirmModal';
 
 const C = {
   surface: 'var(--surface)', surface2: 'var(--surface2)',
@@ -22,6 +23,7 @@ export default function AppBuilder() {
   const [buildLoading, setBuildLoading] = useState(false);
   const [showModelModal, setShowModelModal] = useState(false);
   const [showProfileModal, setShowProfileModal] = useState(false);
+  const [confirmConfig, setConfirmConfig] = useState(null);
   
   const pollingRef = useRef(null);
   const logEndRef = useRef(null);
@@ -83,11 +85,18 @@ export default function AppBuilder() {
     loadData();
   };
 
-  const removeTask = async (taskIdx) => {
-    if (!window.confirm('Are you sure you want to remove this inspection task?')) return;
-    const newTasks = app.inspection_tasks.filter((_, i) => i !== taskIdx);
-    await updateApp(id, { inspection_tasks: newTasks });
-    loadData();
+  const removeTask = (taskIdx) => {
+    setConfirmConfig({
+      title: 'Remove Inspection Task',
+      message: 'This inspection task will be removed from the app configuration.',
+      confirmLabel: 'Remove',
+      onConfirm: async () => {
+        setConfirmConfig(null);
+        const newTasks = app.inspection_tasks.filter((_, i) => i !== taskIdx);
+        await updateApp(id, { inspection_tasks: newTasks });
+        loadData();
+      },
+    });
   };
 
   const [draggedIdx, setDraggedIdx] = useState(null);
@@ -278,11 +287,20 @@ export default function AppBuilder() {
       {showProfileModal && <ProfileModal existingApp={app} startAtReview={modalStartAtReview} onClose={() => { setShowProfileModal(false); loadData(); }} />}
       
       <style>{` @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.5; } 100% { opacity: 1; } } `}</style>
+
+      <ConfirmModal
+        isOpen={!!confirmConfig}
+        title={confirmConfig?.title}
+        message={confirmConfig?.message}
+        confirmLabel={confirmConfig?.confirmLabel}
+        onConfirm={confirmConfig?.onConfirm}
+        onCancel={() => setConfirmConfig(null)}
+      />
     </div>
   );
 }
 
-import { Plus, Trash2, Edit3, ChevronRight, ArrowLeft, Check, ChevronDown, ArrowUp, ArrowDown, Search, Download } from 'lucide-react';
+import { Plus, Trash2, Edit3, ChevronRight, ArrowLeft, Check, ChevronDown, ArrowUp, ArrowDown, Search, Download, ImageIcon } from 'lucide-react';
 
 function ProfileModal({ onClose, existingApp, startAtReview = false }) {
   const navigate = useNavigate();
@@ -335,7 +353,8 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
             acc[code].push({
               modelId: t.modelId,
               class: t.classes?.[0] || '',
-              instruction: t.instruction || t.taskName || ''
+              instruction: t.instruction || t.taskName || '',
+              referenceImage: t.referenceImage || null,
             });
             return acc;
           }, {});
@@ -434,7 +453,7 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
 
   const handleAddRowAI = (rowIndex) => {
     const newData = [...reviewData];
-    newData[rowIndex].selectedAIModels.push({ modelId: '', class: '', instruction: '' });
+    newData[rowIndex].selectedAIModels.push({ modelId: '', class: '', instruction: '', referenceImage: null });
     setReviewData(newData);
   };
 
@@ -462,7 +481,8 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
             tflitePath: model.tflite_path,
             labelsPath: model.labels_path,
             vehicleCode: row.model_code,
-            instruction: ai.instruction
+            instruction: ai.instruction,
+            referenceImage: ai.referenceImage || null,
           });
         }
       });
@@ -683,6 +703,7 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
                     <th style={{ ...thStyle, width: '180px' }}>AI Model</th>
                     <th style={{ ...thStyle, width: '140px' }}>Class</th>
                     <th style={thStyle}>Instruction / Description</th>
+                    <th style={{ ...thStyle, width: '80px' }}>Ref. Image</th>
                     <th style={{ ...thStyle, textAlign: 'right', width: '90px' }}>Reorder</th>
                     <th style={{ ...thStyle, textAlign: 'right', width: '50px' }}></th>
                   </tr>
@@ -695,7 +716,7 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
                       <td colSpan={5} style={{ padding: 0 }}>
                         <div style={{ display: 'flex', flexDirection: 'column' }}>
                           {row.selectedAIModels.map((ai, aiIdx) => (
-                            <div key={aiIdx} style={{ display: 'grid', gridTemplateColumns: '180px 140px 1fr 90px 50px', borderBottom: aiIdx === row.selectedAIModels.length - 1 ? 'none' : `1px solid ${C.border}` }}>
+                            <div key={aiIdx} style={{ display: 'grid', gridTemplateColumns: '180px 140px 1fr 80px 90px 50px', borderBottom: aiIdx === row.selectedAIModels.length - 1 ? 'none' : `1px solid ${C.border}` }}>
                               <div style={{ padding: '12px 16px' }}>
                                 <select 
                                   style={{ ...miniSelectStyle, width: '100%' }} 
@@ -719,11 +740,47 @@ function ProfileModal({ onClose, existingApp, startAtReview = false }) {
                                 </select>
                               </div>
                               <div style={{ padding: '12px 16px' }}>
-                                <input 
-                                  style={{ ...miniSelectStyle, width: '100%', border: 'none', background: 'transparent' }} 
-                                  value={ai.instruction} 
+                                <input
+                                  style={{ ...miniSelectStyle, width: '100%', border: 'none', background: 'transparent' }}
+                                  value={ai.instruction}
                                   onChange={(e) => handleUpdateRowAI(rowIndex, aiIdx, 'instruction', e.target.value)}
-                                  placeholder="e.g. Check front left..." 
+                                  placeholder="e.g. Check front left..."
+                                />
+                              </div>
+                              <div style={{ padding: '8px 12px', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                                <label
+                                  htmlFor={`ref-img-${rowIndex}-${aiIdx}`}
+                                  title={ai.referenceImage ? 'Change reference image' : 'Upload reference image'}
+                                  style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                                >
+                                  {ai.referenceImage ? (
+                                    <img
+                                      src={getReferenceImageUrl(ai.referenceImage)}
+                                      alt="ref"
+                                      style={{ width: 44, height: 44, objectFit: 'cover', borderRadius: 6, border: `2px solid ${C.accent}` }}
+                                    />
+                                  ) : (
+                                    <div style={{ width: 44, height: 44, border: `1px dashed ${C.border}`, borderRadius: 6, display: 'flex', alignItems: 'center', justifyContent: 'center', color: C.muted }}>
+                                      <ImageIcon size={18} />
+                                    </div>
+                                  )}
+                                </label>
+                                <input
+                                  id={`ref-img-${rowIndex}-${aiIdx}`}
+                                  type="file"
+                                  accept="image/*"
+                                  style={{ display: 'none' }}
+                                  onChange={async (e) => {
+                                    const file = e.target.files?.[0];
+                                    if (!file) return;
+                                    try {
+                                      const r = await uploadReferenceImage(file);
+                                      handleUpdateRowAI(rowIndex, aiIdx, 'referenceImage', r.data.filename);
+                                    } catch {
+                                      alert('Image upload failed. Please try again.');
+                                    }
+                                    e.target.value = '';
+                                  }}
                                 />
                               </div>
                               <div style={{ padding: '12px 16px', display: 'flex', gap: 8, justifyContent: 'flex-end', alignItems: 'center' }}>

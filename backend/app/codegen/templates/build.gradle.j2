@@ -5,6 +5,10 @@ ext {
     flutterTargetSdkVersion = 36
 }
 
+// FlutterLocalExtension is defined in buildSrc/src/main/groovy/ so it is
+// compiled before this script runs and is on the classpath for all build
+// scripts including Kotlin DSL (.kts) files in plugin subprojects.
+
 // Robustly load local.properties to get Flutter SDK path
 def getFlutterSdkPath() {
     def properties = new Properties()
@@ -45,13 +49,6 @@ allprojects {
         set("flutter.targetSdkVersion", rootProject.ext.flutterTargetSdkVersion)
     }
 
-    // ALSO inject a 'flutter' object into every project's extra properties
-    project.ext.flutter = [
-        compileSdkVersion: rootProject.ext.flutterCompileSdkVersion,
-        minSdkVersion: rootProject.ext.flutterMinSdkVersion,
-        targetSdkVersion: rootProject.ext.flutterTargetSdkVersion
-    ]
-
     // CRITICAL FIX: Add properties directly to subprojects so they are available during configuration
     if (project != rootProject) {
         project.configurations.all {
@@ -76,17 +73,30 @@ subprojects {
 }
 
 def injectFlutterExtension(p) {
+    // Register 'flutter' as a typed FlutterLocalExtension on the project so
+    // that both Groovy and Kotlin DSL (.kts) plugin build files can access
+    // flutter.compileSdkVersion / flutter.minSdkVersion / flutter.targetSdkVersion.
+    // Skip the :app project — it gets the real FlutterExtension from the plugin.
+    if (p.name != "app" && p.extensions.findByName("flutter") == null) {
+        def ext = new FlutterLocalExtension()
+        ext.compileSdkVersion = rootProject.ext.flutterCompileSdkVersion
+        ext.minSdkVersion     = rootProject.ext.flutterMinSdkVersion
+        ext.targetSdkVersion  = rootProject.ext.flutterTargetSdkVersion
+        p.extensions.add("flutter", ext)
+    }
+
     if (p.hasProperty('android')) {
         p.android {
             compileSdkVersion rootProject.ext.flutterCompileSdkVersion
-            
-            // Ensure the 'flutter' extension exists on the android object too
+
+            // Also add flutter on the android extension for any plugin that
+            // accesses it as android.extensions.flutter rather than project.flutter.
             if (!p.android.extensions.findByName('flutter')) {
-                p.android.extensions.add('flutter', [
-                    compileSdkVersion: rootProject.ext.flutterCompileSdkVersion,
-                    minSdkVersion: rootProject.ext.flutterMinSdkVersion,
-                    targetSdkVersion: rootProject.ext.flutterTargetSdkVersion
-                ])
+                def androidExt = new FlutterLocalExtension()
+                androidExt.compileSdkVersion = rootProject.ext.flutterCompileSdkVersion
+                androidExt.minSdkVersion     = rootProject.ext.flutterMinSdkVersion
+                androidExt.targetSdkVersion  = rootProject.ext.flutterTargetSdkVersion
+                p.android.extensions.add('flutter', androidExt)
             }
         }
     }
@@ -105,6 +115,28 @@ def injectFlutterExtension(p) {
             implementation "androidx.core:core:1.12.0"
             implementation "androidx.lifecycle:lifecycle-common:2.6.2"
             implementation "androidx.lifecycle:lifecycle-runtime:2.6.2"
+        }
+    }
+}
+
+// Fix AGP 8.x: inject namespace for any library that omits it in build.gradle
+// (e.g. bluetooth_print). Namespace is derived from the package attribute in
+// the module's AndroidManifest.xml, which is the correct migration path.
+subprojects {
+    afterEvaluate { proj ->
+        if (proj.plugins.hasPlugin('com.android.library')) {
+            try {
+                def ns = proj.android.namespace
+                if (!ns) {
+                    def manifestFile = proj.file('src/main/AndroidManifest.xml')
+                    if (manifestFile.exists()) {
+                        def matcher = (manifestFile.text =~ /package="([^"]+)"/)
+                        if (matcher.find()) {
+                            proj.android.namespace = matcher.group(1)
+                        }
+                    }
+                }
+            } catch (Exception ignored) {}
         }
     }
 }

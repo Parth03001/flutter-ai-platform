@@ -15,6 +15,7 @@ if (localPropertiesFile.exists()) {
 android {
     namespace "{{ package_name }}"
     compileSdk rootProject.ext.flutterCompileSdkVersion
+    ndkVersion "27.0.12077973"
 
     defaultConfig {
         applicationId "{{ package_name }}"
@@ -66,4 +67,7 @@ dependencies {
     implementation project(':shared_preferences_android')
     implementation project(':mobile_scanner')
     implementation project(':sqlite3_flutter_libs')
+    implementation project(':zsdk')
+    implementation project(':jni')
+    implementation project(':jni_flutter')
 }

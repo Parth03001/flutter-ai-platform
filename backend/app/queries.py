@@ -37,6 +37,11 @@ class MasterDataQueries:
         VALUES (:id, :platform_name, :model_code, :description, CURRENT_TIMESTAMP)
         RETURNING id
     """
+    UPDATE_MAPPING = """
+        UPDATE master_model_mappings
+        SET platform_name = :platform_name, model_code = :model_code, description = :description
+        WHERE id = :id
+    """
     DELETE_MAPPING = "DELETE FROM master_model_mappings WHERE id = :id"
 
 class ResultQueries:

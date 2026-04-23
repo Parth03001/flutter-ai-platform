@@ -12,6 +12,7 @@ class Settings(BaseSettings):
     secret_key: str = "dev-secret-key"
     models_dir: Path = Path("./data/models")
     exports_dir: Path = Path("./data/exports")
+    reference_images_dir: Path = Path("./data/reference_images")
     
     # PostgreSQL Settings
     POSTGRES_USER: str = "postgres"

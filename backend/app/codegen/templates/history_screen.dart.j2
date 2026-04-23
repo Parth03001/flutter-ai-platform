@@ -1,7 +1,12 @@
+import 'dart:io';
 import 'package:flutter/material.dart';
 import 'dart:convert';
+import 'package:image/image.dart' as img;
 import 'package:shared_preferences/shared_preferences.dart';
 import '../database/database.dart';
+import '../ml/detection_result.dart';
+import '../widgets/detection_overlay.dart';
+import '../services/print_service.dart';
 
 class HistoryScreen extends StatefulWidget {
   const HistoryScreen({super.key});
@@ -41,6 +46,8 @@ class _HistoryScreenState extends State<HistoryScreen> {
             'taskName': tr.taskName,
             'detectedPart': tr.className,
             'success': tr.success,
+            'imagePath': tr.imagePath,
+            'detectionsJson': tr.detectionsJson,
           }).toList(),
         });
       }
@@ -117,30 +124,108 @@ class _HistoryScreenState extends State<HistoryScreen> {
                           'Model: ${item['modelCode']} • ${date.day}/${date.month}/${date.year} ${date.hour}:${date.minute}',
                           style: const TextStyle(fontSize: 11, color: Colors.grey),
                         ),
+                        trailing: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            IconButton(
+                              icon: const Icon(Icons.print_outlined, color: Color(0xFFDC143C), size: 22),
+                              tooltip: 'Print Report',
+                              onPressed: () async {
+                                final printers = await PrintService.instance.getBondedPrinters();
+                                if (!context.mounted) return;
+                                if (printers.isEmpty) {
+                                  ScaffoldMessenger.of(context).showSnackBar(
+                                    const SnackBar(
+                                      content: Text("No paired printer found. Please pair a Bluetooth printer in device settings."),
+                                      backgroundColor: Colors.orange,
+                                      duration: Duration(seconds: 4),
+                                    ),
+                                  );
+                                  return;
+                                }
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text("Printing to ${printers.first.name}..."),
+                                    backgroundColor: Colors.blue,
+                                    duration: const Duration(seconds: 2),
+                                  ),
+                                );
+                                final printSuccess = await PrintService.instance.printInspectionReport(
+                                  printer: printers.first,
+                                  vin: item['vin'] as String,
+                                  modelCode: item['modelCode'] as String,
+                                  timestamp: item['timestamp'] as String,
+                                  overallSuccess: overallSuccess,
+                                  tasks: List<Map<String, dynamic>>.from(tasks),
+                                );
+                                if (!context.mounted) return;
+                                ScaffoldMessenger.of(context).showSnackBar(
+                                  SnackBar(
+                                    content: Text(printSuccess
+                                        ? "Report printed to ${printers.first.name}"
+                                        : "Print failed. Please check the printer."),
+                                    backgroundColor: printSuccess ? Colors.green : Colors.red,
+                                  ),
+                                );
+                              },
+                            ),
+                            const Icon(Icons.expand_more, color: Colors.grey),
+                          ],
+                        ),
                         children: [
                           const Divider(height: 1),
-                          ...tasks.map((task) => Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
-                            child: Row(
+                          ...tasks.map((task) {
+                            final String? imgPath = task['imagePath'] as String?;
+                            final String? detectionsRaw = task['detectionsJson'] as String?;
+                            List<DetectionResult> detections = [];
+                            if (detectionsRaw != null) {
+                              try {
+                                detections = (jsonDecode(detectionsRaw) as List)
+                                    .map((e) => DetectionResult.fromJson(e as Map<String, dynamic>))
+                                    .toList();
+                              } catch (_) {}
+                            }
+                            final hasImage = imgPath != null && File(imgPath).existsSync();
+
+                            return Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
                               children: [
-                                Icon(
-                                  task['success'] ? Icons.check : Icons.close,
-                                  color: task['success'] ? Colors.green : Colors.red,
-                                  size: 16,
-                                ),
-                                const SizedBox(width: 12),
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                Padding(
+                                  padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 10),
+                                  child: Row(
                                     children: [
-                                      Text(task['taskName'] ?? 'Task', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
-                                      Text('Detected: ${task['detectedPart']}', style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
+                                      Icon(
+                                        task['success'] ? Icons.check : Icons.close,
+                                        color: task['success'] ? Colors.green : Colors.red,
+                                        size: 16,
+                                      ),
+                                      const SizedBox(width: 12),
+                                      Expanded(
+                                        child: Column(
+                                          crossAxisAlignment: CrossAxisAlignment.start,
+                                          children: [
+                                            Text(task['taskName'] ?? 'Task', style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 13)),
+                                            Text('Detected: ${task['detectedPart']}', style: const TextStyle(fontSize: 11, color: Colors.blueGrey)),
+                                          ],
+                                        ),
+                                      ),
                                     ],
                                   ),
                                 ),
+                                if (hasImage)
+                                  Padding(
+                                    padding: const EdgeInsets.fromLTRB(16, 0, 16, 12),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(8),
+                                      child: _HistoryImageWithOverlay(
+                                        imagePath: imgPath!,
+                                        detections: detections,
+                                      ),
+                                    ),
+                                  ),
                               ],
-                            ),
-                          )).toList(),
+                            );
+                          }).toList(),
                           const SizedBox(height: 8),
                         ],
                       ),
@@ -151,3 +236,66 @@ class _HistoryScreenState extends State<HistoryScreen> {
   }
 }
 
+/// Loads the EXIF-corrected image size then renders the image and the
+/// single best-match bbox overlay using the same FittedBox approach as
+/// the capture screen — ensuring pixel-accurate alignment.
+class _HistoryImageWithOverlay extends StatefulWidget {
+  final String imagePath;
+  final List<DetectionResult> detections;
+
+  const _HistoryImageWithOverlay({required this.imagePath, required this.detections});
+
+  @override
+  State<_HistoryImageWithOverlay> createState() => _HistoryImageWithOverlayState();
+}
+
+class _HistoryImageWithOverlayState extends State<_HistoryImageWithOverlay> {
+  Size? _imageSize;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadSize();
+  }
+
+  Future<void> _loadSize() async {
+    try {
+      final bytes = await File(widget.imagePath).readAsBytes();
+      final decoded = img.decodeImage(bytes);
+      if (decoded != null && mounted) {
+        final oriented = img.bakeOrientation(decoded);
+        setState(() => _imageSize = Size(oriented.width.toDouble(), oriented.height.toDouble()));
+      }
+    } catch (_) {}
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (_imageSize == null) {
+      return Image.file(File(widget.imagePath), fit: BoxFit.contain);
+    }
+    return FittedBox(
+      fit: BoxFit.contain,
+      child: SizedBox(
+        width: _imageSize!.width,
+        height: _imageSize!.height,
+        child: Stack(
+          fit: StackFit.expand,
+          children: [
+            Image.file(
+              File(widget.imagePath),
+              fit: BoxFit.fill,
+              width: _imageSize!.width,
+              height: _imageSize!.height,
+            ),
+            if (widget.detections.isNotEmpty)
+              DetectionOverlay(
+                results: widget.detections,
+                previewSize: _imageSize!,
+              ),
+          ],
+        ),
+      ),
+    );
+  }
+}

@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import { Plus, Trash2, ClipboardList } from 'lucide-react';
 import { getApps, deleteApp, exportApp } from '../api';
+import ConfirmModal from './ConfirmModal';
 import '../styles/Dashboard.css';
 
 function Skeleton({ w = '100%', h = 16 }) {
@@ -11,6 +12,7 @@ function Skeleton({ w = '100%', h = 16 }) {
 export default function Dashboard() {
   const [apps, setApps] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [confirmConfig, setConfirmConfig] = useState(null);
   const navigate = useNavigate();
 
   useEffect(() => {
@@ -19,10 +21,17 @@ export default function Dashboard() {
       .catch(() => setLoading(false));
   }, []);
 
-  const handleDelete = async (id, name) => {
-    if (!window.confirm(`Delete "${name}"?`)) return;
-    await deleteApp(id);
-    setApps(prev => prev.filter(a => a.id !== id));
+  const handleDelete = (id, name) => {
+    setConfirmConfig({
+      title: 'Delete App',
+      message: `"${name}" will be permanently deleted. This action cannot be undone.`,
+      confirmLabel: 'Delete',
+      onConfirm: async () => {
+        setConfirmConfig(null);
+        await deleteApp(id);
+        setApps(prev => prev.filter(a => a.id !== id));
+      },
+    });
   };
 
   const handleExport = async (id, name) => {
@@ -135,6 +144,15 @@ export default function Dashboard() {
           ))}
         </div>
       )}
+
+      <ConfirmModal
+        isOpen={!!confirmConfig}
+        title={confirmConfig?.title}
+        message={confirmConfig?.message}
+        confirmLabel={confirmConfig?.confirmLabel}
+        onConfirm={confirmConfig?.onConfirm}
+        onCancel={() => setConfirmConfig(null)}
+      />
     </div>
   );
 }

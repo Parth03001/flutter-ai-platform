@@ -50,12 +50,34 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         for task in inspection_tasks:
             mid = task.get("modelId")
             paths = model_id_to_paths.get(mid, {})
+            task_classes = task.get("classes", [])
+
+            # Validate task classes against the model's actual trained classes.
+            # If none of the configured classes exist in the model, fall back to
+            # the model's full class list to prevent silent NOT FOUND mismatches.
+            model_for_task = next(
+                (ma for ma in models_list if get_attr(ma, "id") == mid), None
+            )
+            if model_for_task:
+                model_classes = get_attr(model_for_task, "classes", []) or []
+                if model_classes:
+                    valid = [c for c in task_classes if c in model_classes]
+                    if not valid:
+                        print(
+                            f"[generator] WARNING: task '{task.get('taskName')}' "
+                            f"classes {task_classes} not found in model classes "
+                            f"{model_classes}. Using model classes as fallback."
+                        )
+                        task_classes = model_classes
+
+            ref_img = task.get("referenceImage")
             models_manifest.append({
                 "name": task.get("taskName") or task.get("modelName"),
-                "classes": task.get("classes", []),
+                "classes": task_classes,
                 "tflite_path": paths.get("tflite", "assets/models/model_0.tflite"),
                 "labels_path": paths.get("labels", "assets/models/labels_0.txt"),
-                "vehicle_code": task.get("vehicleCode") # Added for mobile filtering
+                "vehicle_code": task.get("vehicleCode"),
+                "reference_image": f"assets/reference_images/{ref_img}" if ref_img else None,
             })
     else:
         # Fallback to model list if no tasks defined
@@ -115,6 +137,8 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         "lib/screens/component_config_screen.dart": "component_config_screen.dart.j2",
         "lib/screens/inspection_camera_screen.dart": "inspection_camera_screen.dart.j2",
         "lib/screens/history_screen.dart": "history_screen.dart.j2",
+        "lib/screens/printer_discovery_screen.dart": "printer_discovery_screen.dart.j2",
+        "lib/services/print_service.dart": "print_service.dart.j2",
         "lib/database/database.dart": "database.dart.j2",
         "lib/ml/detector.dart": "detector.dart.j2",
         "lib/ml/detection_result.dart": "detection_result.dart.j2",
@@ -136,10 +160,24 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         "android/gradle/wrapper/gradle-wrapper.jar": "gradle-wrapper.jar.raw",
         "android/gradlew": "gradlew.j2",
         "android/gradlew.bat": "gradlew.bat.j2",
+        # buildSrc: compiled before any build script, puts FlutterLocalExtension
+        # on the classpath so Kotlin DSL (.kts) plugin files can resolve
+        # flutter.compileSdkVersion at compile time.
+        "android/buildSrc/build.gradle": "buildSrc_build.gradle.j2",
+        "android/buildSrc/src/main/groovy/FlutterLocalExtension.groovy": "FlutterLocalExtension.groovy.j2",
         f"android/app/src/main/kotlin/{ctx['package_name'].replace('.', '/')}/MainActivity.kt": "MainActivity.kt.j2",
         "android/app/src/main/res/values/styles.xml": "styles.xml.j2",
 
         "android/app/src/main/res/drawable/launch_background.xml": "launch_background.xml.j2",
+    }
+
+    # Android mipmap icon sizes: density -> (width, height)
+    MIPMAP_SIZES = {
+        "mipmap-mdpi":    (48,  48),
+        "mipmap-hdpi":    (72,  72),
+        "mipmap-xhdpi":   (96,  96),
+        "mipmap-xxhdpi":  (144, 144),
+        "mipmap-xxxhdpi": (192, 192),
     }
 
     # Fetch all master mappings for generic VIN decoding
@@ -182,8 +220,37 @@ def generate_flutter_project(app_project, model_asset=None, all_model_assets=Non
         # Add models manifest
         import json
         zf.writestr(f"{root}/assets/models_manifest.json", json.dumps(models_manifest, indent=2))
-        
+
         # Add master data for generic decoding
         zf.writestr(f"{root}/assets/master_data.json", json.dumps(master_data_manifest, indent=2))
+
+        # Bundle Android launcher icons for each mipmap density
+        icon_src = TEMPLATES_DIR / "icons" / "ic_launcher.png"
+        if icon_src.exists():
+            try:
+                from PIL import Image
+                import io as _io
+                with Image.open(icon_src) as img:
+                    img = img.convert("RGBA")
+                    for density, (w, h) in MIPMAP_SIZES.items():
+                        resized = img.resize((w, h), Image.LANCZOS)
+                        buf_icon = _io.BytesIO()
+                        resized.save(buf_icon, format="PNG")
+                        zf.writestr(
+                            f"{root}/android/app/src/main/res/{density}/ic_launcher.png",
+                            buf_icon.getvalue(),
+                        )
+            except Exception as e:
+                print(f"Warning: Could not process app icon: {e}")
+
+        # Bundle reference images into the app assets
+        from app.config import settings as app_settings
+        for entry in models_manifest:
+            ref = entry.get("reference_image")
+            if ref:
+                filename = ref.split("/")[-1]
+                img_path = app_settings.reference_images_dir / filename
+                if img_path.exists():
+                    zf.writestr(f"{root}/assets/reference_images/{filename}", img_path.read_bytes())
 
     return buf.getvalue()

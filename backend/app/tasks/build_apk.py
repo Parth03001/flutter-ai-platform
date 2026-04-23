@@ -4,6 +4,8 @@ import zipfile
 import io
 import shutil
 import json
+import time
+import tempfile
 from pathlib import Path
 from app.tasks.celery_app import celery_app
 from app.config import settings
@@ -92,6 +94,104 @@ def _safe_extract(zip_bytes, extract_path):
         for member in zf.infolist():
             zf.extract(member, extract_path)
 
+def _force_delete_dir(path: Path, log_fn=None):
+    """
+    Reliably delete a directory on Windows, including long-path scenarios.
+
+    Two compounding problems on Windows:
+      1. shutil.rmtree(ignore_errors=True) silently fails when Gradle holds
+         file locks → stale .flutter-plugins-dependencies survives → next build
+         reuses the old plugin list (e.g. jni) → "package X does not exist".
+      2. Gradle creates deeply nested intermediates such as:
+           .../permission_handler_android/intermediates/javac/release/classes/
+             com/baseflow/permissionhandler/PermissionManagerShouldShowRequest...
+         These paths exceed Windows MAX_PATH (260 chars).  Both shutil.rmtree
+         and 'rd /s /q' fail with [WinError 3] on such paths.
+
+    Strategy (Windows):
+      1. Stop Gradle daemon via 'gradlew --stop' to release build-dir locks.
+      2. Kill remaining java.exe and wait for handles to close.
+      3. Use robocopy /MIR to mirror an empty temp dir over the target —
+         robocopy uses the \\?\ long-path prefix internally, so it can empty
+         directories that exceed MAX_PATH where rmtree/rd cannot.
+      4. Now that the directory is empty, 'rd /s /q' removes the shell.
+      5. Raise clearly (not silently) if the directory still exists.
+    """
+    if not path.exists():
+        return
+
+    def _log(msg):
+        if log_fn:
+            log_fn(msg)
+
+    # 1. Ask the Gradle daemon to stop so it releases its locks.
+    gradlew = path / "android" / "gradlew.bat"
+    if gradlew.exists():
+        try:
+            subprocess.run(
+                [str(gradlew), "--stop"],
+                cwd=str(path / "android"),
+                capture_output=True,
+                timeout=20,
+            )
+            time.sleep(2)
+        except Exception:
+            pass
+
+    # 2. Kill java.exe (covers any daemon that ignored --stop).
+    try:
+        subprocess.run(["taskkill", "/F", "/IM", "java.exe"], capture_output=True)
+        time.sleep(2)  # Give Windows time to release file handles
+    except Exception:
+        pass
+
+    abs_path = str(path.resolve())
+
+    if os.name == "nt":
+        # 3. robocopy /MIR: mirror an empty directory over the target.
+        #    This is the standard Windows trick for deleting trees with paths
+        #    longer than MAX_PATH — robocopy handles \\?\ prefixes internally.
+        try:
+            with tempfile.TemporaryDirectory() as empty_dir:
+                subprocess.run(
+                    [
+                        "robocopy", empty_dir, abs_path,
+                        "/MIR",   # mirror (delete everything in target)
+                        "/NFL",   # no file list
+                        "/NDL",   # no directory list
+                        "/NJH",   # no job header
+                        "/NJS",   # no job summary
+                        "/NC",    # no class
+                        "/NS",    # no size
+                    ],
+                    capture_output=True,
+                    timeout=120,
+                )
+        except Exception as exc:
+            _log(f"robocopy step failed (non-fatal): {exc}\n")
+
+        # 4. Remove the now-empty directory shell.
+        try:
+            subprocess.run(
+                ["cmd", "/c", "rd", "/s", "/q", abs_path],
+                capture_output=True,
+                timeout=30,
+            )
+            time.sleep(1)
+        except Exception:
+            pass
+    else:
+        # Non-Windows: plain rmtree is fine.
+        shutil.rmtree(path, ignore_errors=True)
+
+    if path.exists():
+        raise RuntimeError(
+            f"Cannot delete stale build directory: {path}\n"
+            "Please stop any running Gradle/Java processes, manually delete\n"
+            f"  {path}\n"
+            "then trigger a new build."
+        )
+
 @celery_app.task(bind=True, name="build_apk_task")
 def build_apk_task(self, app_id: str):
     """Generate code and build APK for the given app_id."""
@@ -122,18 +222,20 @@ def build_apk_task(self, app_id: str):
         zip_bytes = generate_flutter_project(app, all_model_assets=all_model_assets)
         
         # 2. Extract to export directory
-        _update_status(db, app_id, step="Preparing project workspace...", log_append="Extracting project files...\n")
+        _update_status(db, app_id, step="Preparing project workspace...", log_append="Cleaning previous build workspace...\n")
         export_root = Path(settings.exports_dir) / app_id
 
-        # Aggressive cleanup
-        try:
-            subprocess.run(["taskkill", "/F", "/IM", "java.exe"], capture_output=True)
-        except Exception: pass
+        # Force-delete the old directory so no stale files survive.
+        # shutil.rmtree(ignore_errors=True) silently fails on Windows when
+        # Gradle holds file locks, leaving old .flutter-plugins-dependencies
+        # and Gradle caches that cause "package jni does not exist" errors.
+        _force_delete_dir(
+            export_root,
+            log_fn=lambda msg: _update_status(db, app_id, log_append=msg),
+        )
 
-        if export_root.exists():
-            shutil.rmtree(export_root, ignore_errors=True)
-        
         export_root.mkdir(parents=True, exist_ok=True)
+        _update_status(db, app_id, step="Preparing project workspace...", log_append="Extracting project files...\n")
         _safe_extract(zip_bytes, export_root)
         project_dir = next(export_root.iterdir())
         
@@ -163,9 +265,19 @@ def build_apk_task(self, app_id: str):
         env["PATH"] = f"C:\\jdk-17.0.14+7\\bin;C:\\flutter\\bin;C:\\android-sdk\\cmdline-tools\\latest\\bin;C:\\android-sdk\\platform-tools;{env.get('PATH', '')}"
         env["FLUTTER_ROOT"] = "C:\\flutter"
 
-        # flutter pub get
+        # flutter clean — wipe any Gradle / Dart build caches that may have
+        # survived an incomplete previous cleanup (e.g. cross-drive .gradle dirs).
+        # This is fast on a freshly extracted project but is a critical safety net.
+        _update_status(db, app_id, step="Fetching dependencies...", log_append="Running 'flutter clean'...\n")
+        _run_command_streaming(db, app_id, [flutter_path, "clean"], project_dir, env)
+
+        # flutter pub get — must succeed to generate .flutter-plugins-dependencies
+        # (which Gradle reads to produce GeneratedPluginRegistrant.java).
+        # If it fails silently the subsequent Gradle build will reference packages
+        # that don't exist in the compile classpath → "package X does not exist".
         _update_status(db, app_id, step="Fetching dependencies...", log_append="Running 'flutter pub get'...\n")
-        _run_command_streaming(db, app_id, [flutter_path, "pub", "get"], project_dir, env)
+        ret_pub = _run_command_streaming(db, app_id, [flutter_path, "pub", "get"], project_dir, env)
+        if ret_pub != 0: raise Exception(f"'flutter pub get' failed with exit code {ret_pub}. Check pubspec.yaml and network access.")
 
         # dart run build_runner
         dart_path = r"C:\flutter\bin\dart.bat"

@@ -54,9 +54,21 @@ export const buildAPK = (id) => api.post(`/apps/${id}/build`);
 export const downloadAPK = (id) =>
   api.get(`/apps/${id}/apk`, { responseType: 'blob' });
 
+// ── Reference Images ─────────────────────────────────────────────────────────
+export const uploadReferenceImage = (file) => {
+  const form = new FormData();
+  form.append('file', file);
+  return api.post('/assets/reference-image', form, {
+    headers: { 'Content-Type': 'multipart/form-data' },
+  });
+};
+export const getReferenceImageUrl = (filename) =>
+  `http://localhost:8001/api/v1/assets/reference-image/${filename}`;
+
 // ── Master Data ──────────────────────────────────────────────────────────────
 export const getMasterMappings = () => api.get('/master-data');
 export const createMasterMapping = (data) => api.post('/master-data', data);
+export const updateMasterMapping = (id, data) => api.put(`/master-data/${id}`, data);
 export const deleteMasterMapping = (id) => api.delete(`/master-data/${id}`);
 
 export default api;

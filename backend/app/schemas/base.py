@@ -91,6 +91,12 @@ class MasterMappingCreate(BaseModel):
     description: Optional[str] = None
 
 
+class MasterMappingUpdate(BaseModel):
+    platform_name: Optional[str] = None
+    model_code: Optional[str] = None
+    description: Optional[str] = None
+
+
 class MasterMappingResponse(BaseModel):
     id: str
     platform_name: str

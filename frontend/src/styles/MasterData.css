@@ -157,6 +157,81 @@
   letter-spacing: 0.04em;
 }
 
+/* Checkbox */
+.master-checkbox {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+  accent-color: var(--accent2);
+}
+
+/* Selected row highlight */
+.master-row-selected {
+  background: rgba(220, 20, 60, 0.06) !important;
+}
+
+/* Action buttons (edit / delete icons) */
+.master-action-btns {
+  display: inline-flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
+.btn-icon-edit,
+.btn-icon-delete {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: var(--radius-sm);
+  border: 1px solid var(--border);
+  background: transparent;
+  cursor: pointer;
+  transition: background 0.15s, border-color 0.15s, color 0.15s;
+}
+
+.btn-icon-edit {
+  color: var(--text-muted);
+}
+
+.btn-icon-edit:hover {
+  background: rgba(99, 102, 241, 0.12);
+  border-color: rgba(99, 102, 241, 0.4);
+  color: #818cf8;
+}
+
+.btn-icon-delete {
+  color: var(--text-muted);
+}
+
+.btn-icon-delete:hover {
+  background: rgba(220, 20, 60, 0.12);
+  border-color: rgba(220, 20, 60, 0.4);
+  color: var(--accent2);
+}
+
+/* Bulk delete button */
+.btn-bulk-delete {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 16px;
+  border-radius: var(--radius-sm);
+  border: 1px solid rgba(220, 20, 60, 0.4);
+  background: rgba(220, 20, 60, 0.1);
+  color: var(--accent2);
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+  white-space: nowrap;
+}
+
+.btn-bulk-delete:hover {
+  background: rgba(220, 20, 60, 0.2);
+}
+
 /* Empty / loading */
 .master-empty {
   padding: 60px 20px;
