@@ -323,7 +323,9 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
   }
 
   void _onSaveAndContinue() {
-    _results[_currentIndex] = {
+    // _handleCapture already stored the full result (imagePath, detectionsJson).
+    // Only fall back if somehow the capture result is missing.
+    _results[_currentIndex] ??= {
       'className': _bestResult?.className ?? 'None',
       'success': _bestResult != null,
     };
