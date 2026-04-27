@@ -280,20 +280,20 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
             'detectionsJson': detectionsJson,
           };
         } else {
-          _addLog("RESULT: NOT FOUND");
-          // Collect non-target detections (top 3 by confidence) to show the user.
+          // Model detected something but it's not the target class.
           final nonTarget = List<DetectionResult>.from(allDetections)
             ..sort((a, b) => b.confidence.compareTo(a.confidence));
           _detectedNonTargetClasses = nonTarget.take(3).toList();
-          if (allDetections.isNotEmpty) {
-            final best = allDetections.reduce((a, b) => a.confidence > b.confidence ? a : b);
-            _addLog("Detected '${best.className}' but target is '${targetClasses.join(', ')}'");
-          }
+          final bestDetected = allDetections.isNotEmpty
+              ? allDetections.reduce((a, b) => a.confidence > b.confidence ? a : b)
+              : null;
+          final detectedLabel = bestDetected?.className ?? 'nothing';
+          _addLog("Wrong image: target is '${targetClasses.join(', ')}' but detected '$detectedLabel'");
           _results[_currentIndex] = {
-            'className': 'None',
+            'className': bestDetected?.className ?? 'None',
             'success': false,
             'imagePath': savedImagePath,
-            'detectionsJson': jsonEncode([]),
+            'detectionsJson': bestDetected != null ? jsonEncode([bestDetected.toJson()]) : jsonEncode([]),
           };
         }
         _isAnalyzing = false;
@@ -483,7 +483,12 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
                           ),
                           child: _bestResult != null
                               ? Text('✓  ${_bestResult!.className}', style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold))
-                              : const Text('NOT FOUND', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13)),
+                              : Text(
+                                  _detectedNonTargetClasses.isNotEmpty
+                                      ? 'Detected: ${_detectedNonTargetClasses.first.className}'
+                                      : 'Wrong image',
+                                  style: const TextStyle(color: Colors.white, fontWeight: FontWeight.bold, fontSize: 13),
+                                ),
                         ),
                       ),
 
@@ -501,49 +506,39 @@ class _InspectionCameraScreenState extends State<InspectionCameraScreen> with Wi
                             mainAxisSize: MainAxisSize.min,
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
-                              // Target not found row
                               Row(children: [
-                                const Icon(Icons.cancel, color: Colors.red, size: 16),
+                                const Icon(Icons.warning_amber_rounded, color: Colors.orange, size: 16),
                                 const SizedBox(width: 6),
+                                const Text('Wrong image captured', style: TextStyle(color: Colors.orange, fontWeight: FontWeight.bold, fontSize: 13)),
+                              ]),
+                              const SizedBox(height: 10),
+                              Row(children: [
+                                const Icon(Icons.track_changes, color: Colors.blue, size: 14),
+                                const SizedBox(width: 6),
+                                const Text('Target class: ', style: TextStyle(color: Colors.white54, fontSize: 12)),
                                 Expanded(
                                   child: Text(
-                                    'Target not found: ${List<String>.from(widget.tasks[_currentIndex]['classes'] ?? []).join(', ')}',
-                                    style: const TextStyle(color: Colors.red, fontWeight: FontWeight.bold, fontSize: 13),
+                                    List<String>.from(widget.tasks[_currentIndex]['classes'] ?? []).join(', '),
+                                    style: const TextStyle(color: Colors.white, fontWeight: FontWeight.w600, fontSize: 12),
                                     overflow: TextOverflow.ellipsis,
                                   ),
                                 ),
                               ]),
-                              const SizedBox(height: 10),
-                              if (_detectedNonTargetClasses.isNotEmpty) ...[
-                                const Text('Detected in this image:', style: TextStyle(color: Colors.white54, fontSize: 11)),
-                                const SizedBox(height: 6),
-                                ..._detectedNonTargetClasses.map((d) => Padding(
-                                  padding: const EdgeInsets.only(bottom: 6),
-                                  child: Row(children: [
-                                    const Icon(Icons.close, color: Colors.orange, size: 16),
-                                    const SizedBox(width: 6),
-                                    Text(
-                                      '${d.className}',
-                                      style: const TextStyle(
-                                        color: Colors.orange,
-                                        fontSize: 13,
-                                        fontWeight: FontWeight.w600,
-                                        decoration: TextDecoration.lineThrough,
-                                        decorationColor: Colors.orange,
-                                        decorationThickness: 2,
-                                      ),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    Text(
-                                      '${(d.confidence * 100).toStringAsFixed(0)}%',
-                                      style: const TextStyle(color: Colors.white54, fontSize: 12),
-                                    ),
-                                    const SizedBox(width: 8),
-                                    const Text('— not this task', style: TextStyle(color: Colors.white38, fontSize: 11, fontStyle: FontStyle.italic)),
-                                  ]),
-                                )),
-                              ] else
-                                const Text('Nothing was detected in this image.', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                              const SizedBox(height: 6),
+                              Row(children: [
+                                const Icon(Icons.find_in_page, color: Colors.red, size: 14),
+                                const SizedBox(width: 6),
+                                const Text('Detected: ', style: TextStyle(color: Colors.white54, fontSize: 12)),
+                                Expanded(
+                                  child: Text(
+                                    _detectedNonTargetClasses.isNotEmpty
+                                        ? '${_detectedNonTargetClasses.first.className} (${(_detectedNonTargetClasses.first.confidence * 100).toStringAsFixed(0)}%)'
+                                        : 'nothing',
+                                    style: const TextStyle(color: Colors.red, fontWeight: FontWeight.w600, fontSize: 12),
+                                    overflow: TextOverflow.ellipsis,
+                                  ),
+                                ),
+                              ]),
                             ],
                           ),
                         ),
