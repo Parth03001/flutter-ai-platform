@@ -264,6 +264,7 @@ def build_apk_task(self, app_id: str):
         env["ANDROID_HOME"] = r"C:\android-sdk"
         env["PATH"] = f"C:\\jdk-17.0.14+7\\bin;C:\\flutter\\bin;C:\\android-sdk\\cmdline-tools\\latest\\bin;C:\\android-sdk\\platform-tools;{env.get('PATH', '')}"
         env["FLUTTER_ROOT"] = "C:\\flutter"
+        env["PUB_CACHE"] = "C:\\pub-cache"
 
         # flutter clean — wipe any Gradle / Dart build caches that may have
         # survived an incomplete previous cleanup (e.g. cross-drive .gradle dirs).
