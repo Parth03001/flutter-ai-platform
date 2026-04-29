@@ -29,27 +29,18 @@ plugins {
 
 include ":app"
 
-// --- MANUAL OFFLINE PLUGIN BRIDGING ---
-// NOTE: variable is named pluginMap (not 'plugins') to avoid shadowing
-//       Gradle's built-in plugins{} DSL object which causes silent failures.
-def pubCacheDir = "C:/pub-cache/hosted/pub.dev"
-
-def pluginMap = [
-    "camera_android": "camera_android-0.10.10+15",
-    "camera_android_camerax": "camera_android_camerax-0.6.30",
-    "permission_handler_android": "permission_handler_android-12.1.0",
-    "flutter_plugin_android_lifecycle": "flutter_plugin_android_lifecycle-2.0.34",
-    "tflite_flutter": "tflite_flutter-0.10.4",
-    "path_provider_android": "path_provider_android-2.2.22",
-    "shared_preferences_android": "shared_preferences_android-2.4.23",
-    "mobile_scanner": "mobile_scanner-3.5.7",
-    "sqlite3_flutter_libs": "sqlite3_flutter_libs-0.5.42",
-    "zsdk": "zsdk-5.0.0",
-    "jni": "jni-1.0.0",
-    "jni_flutter": "jni_flutter-1.0.1"
-]
-
-pluginMap.each { name, folder ->
-    include ":$name"
-    project(":$name").projectDir = new File(pubCacheDir, "$folder/android")
+// --- OFFLINE PLUGIN BRIDGING via .flutter-plugins-dependencies ---
+// Flutter writes this JSON file during 'flutter pub get' with the exact
+// versioned path for every plugin. Reading it here is more reliable than
+// scanning the pub cache manually — no version strings to maintain.
+def pluginsDepsFile = new File(settingsDir, "../.flutter-plugins-dependencies")
+if (pluginsDepsFile.exists()) {
+    def json = new groovy.json.JsonSlurper().parse(pluginsDepsFile)
+    json?.plugins?.android?.each { plugin ->
+        def androidDir = new File(plugin.path.toString(), "android")
+        if (androidDir.exists()) {
+            include ":${plugin.name}"
+            project(":${plugin.name}").projectDir = androidDir
+        }
+    }
 }
