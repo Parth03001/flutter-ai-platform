@@ -29,43 +29,18 @@ plugins {
 
 include ":app"
 
-// --- MANUAL OFFLINE PLUGIN BRIDGING ---
-// Dynamically discovers the actual downloaded version in the pub cache so
-// hardcoded version strings never cause a path mismatch after pub upgrades.
-def pubCacheBase = new File("C:/pub-cache/hosted/pub.dev")
-
-// Returns the android/ dir for the latest matching version in the pub cache,
-// or null if the package was not downloaded (skipped silently).
-def findPluginAndroidDir = { String pluginName ->
-    if (!pubCacheBase.exists()) return null
-    def candidates = pubCacheBase.listFiles()?.findAll { f ->
-        f.isDirectory() && f.name.startsWith(pluginName + "-")
-    }
-    if (!candidates) return null
-    def best = candidates.sort { a, b -> b.name <=> a.name }.first()
-    def androidDir = new File(best, "android")
-    return androidDir.exists() ? androidDir : null
-}
-
-def pluginNames = [
-    "camera_android",
-    "camera_android_camerax",
-    "permission_handler_android",
-    "flutter_plugin_android_lifecycle",
-    "tflite_flutter",
-    "path_provider_android",
-    "shared_preferences_android",
-    "mobile_scanner",
-    "sqlite3_flutter_libs",
-    "zsdk",
-    "jni",
-    "jni_flutter"
-]
-
-pluginNames.each { name ->
-    def androidDir = findPluginAndroidDir(name)
-    if (androidDir) {
-        include ":$name"
-        project(":$name").projectDir = androidDir
+// --- OFFLINE PLUGIN BRIDGING via .flutter-plugins-dependencies ---
+// Flutter writes this JSON file during 'flutter pub get' with the exact
+// versioned path for every plugin. Reading it here is more reliable than
+// scanning the pub cache manually — no version strings to maintain.
+def pluginsDepsFile = new File(settingsDir, "../.flutter-plugins-dependencies")
+if (pluginsDepsFile.exists()) {
+    def json = new groovy.json.JsonSlurper().parse(pluginsDepsFile)
+    json?.plugins?.android?.each { plugin ->
+        def androidDir = new File(plugin.path.toString(), "android")
+        if (androidDir.exists()) {
+            include ":${plugin.name}"
+            project(":${plugin.name}").projectDir = androidDir
+        }
     }
 }
