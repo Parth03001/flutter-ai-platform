@@ -9,3 +9,10 @@ kotlin.incremental.js=false
 android.useAndroidX=true
 android.enableJetifier=true
 android.ignoreAarMetadataCheck=true
+
+# Opt out of AGP 9+ new DSL interface — our templates target AGP 8.1.1.
+# Required when Flutter SDK >= 3.27 is used on the build machine, since the
+# updated flutter_tools gradle plugin detects AGP 9+ transitive deps
+# (e.g. camera_android_camerax) and switches to new-DSL-only mode, which
+# causes a NullPointerException in the project evaluation listener.
+android.newDsl=false
