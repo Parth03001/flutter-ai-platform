@@ -30,26 +30,42 @@ plugins {
 include ":app"
 
 // --- MANUAL OFFLINE PLUGIN BRIDGING ---
-// NOTE: variable is named pluginMap (not 'plugins') to avoid shadowing
-//       Gradle's built-in plugins{} DSL object which causes silent failures.
-def pubCacheDir = "C:/pub-cache/hosted/pub.dev"
+// Dynamically discovers the actual downloaded version in the pub cache so
+// hardcoded version strings never cause a path mismatch after pub upgrades.
+def pubCacheBase = new File("C:/pub-cache/hosted/pub.dev")
 
-def pluginMap = [
-    "camera_android": "camera_android-0.10.10+15",
-    "camera_android_camerax": "camera_android_camerax-0.6.30",
-    "permission_handler_android": "permission_handler_android-12.1.0",
-    "flutter_plugin_android_lifecycle": "flutter_plugin_android_lifecycle-2.0.34",
-    "tflite_flutter": "tflite_flutter-0.10.4",
-    "path_provider_android": "path_provider_android-2.2.22",
-    "shared_preferences_android": "shared_preferences_android-2.4.23",
-    "mobile_scanner": "mobile_scanner-3.5.7",
-    "sqlite3_flutter_libs": "sqlite3_flutter_libs-0.5.42",
-    "zsdk": "zsdk-5.0.0",
-    "jni": "jni-1.0.0",
-    "jni_flutter": "jni_flutter-1.0.1"
+// Returns the android/ dir for the latest matching version in the pub cache,
+// or null if the package was not downloaded (skipped silently).
+def findPluginAndroidDir = { String pluginName ->
+    if (!pubCacheBase.exists()) return null
+    def candidates = pubCacheBase.listFiles()?.findAll { f ->
+        f.isDirectory() && f.name.startsWith(pluginName + "-")
+    }
+    if (!candidates) return null
+    def best = candidates.sort { a, b -> b.name <=> a.name }.first()
+    def androidDir = new File(best, "android")
+    return androidDir.exists() ? androidDir : null
+}
+
+def pluginNames = [
+    "camera_android",
+    "camera_android_camerax",
+    "permission_handler_android",
+    "flutter_plugin_android_lifecycle",
+    "tflite_flutter",
+    "path_provider_android",
+    "shared_preferences_android",
+    "mobile_scanner",
+    "sqlite3_flutter_libs",
+    "zsdk",
+    "jni",
+    "jni_flutter"
 ]
 
-pluginMap.each { name, folder ->
-    include ":$name"
-    project(":$name").projectDir = new File(pubCacheDir, "$folder/android")
+pluginNames.each { name ->
+    def androidDir = findPluginAndroidDir(name)
+    if (androidDir) {
+        include ":$name"
+        project(":$name").projectDir = androidDir
+    }
 }
